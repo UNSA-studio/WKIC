@@ -1,0 +1,30 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release, .NET Framework 4.8)
+        run: msbuild WindowsKeyboardIntegrityCheck.csproj /p:Configuration=Release /p:OutputPath=build\ /v:minimal
+
+      - name: Show output
+        run: dir build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindowsKeyboardIntegrityCheck
+          path: build/WindowsKeyboardIntegrityCheck.exe
+          if-no-files-found: error
