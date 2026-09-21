@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -17,14 +21,54 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build (Release, .NET Framework 4.8)
-        run: msbuild WindowsKeyboardIntegrityCheck.csproj /p:Configuration=Release /p:OutputPath=build\ /v:minimal
+        id: build
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          msbuild WindowsKeyboardIntegrityCheck.csproj /p:Configuration=Release /p:OutputPath=build\ /v:normal 2>&1 |
+            Tee-Object -FilePath build_log.txt
+          exit $LASTEXITCODE
 
       - name: Show output
+        if: steps.build.outcome == 'success'
         run: dir build
 
-      - name: Upload artifact
+      - name: Prepare build log
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path build_log.txt) {
+            $log = Get-Content build_log.txt -Raw
+            $body = "``````text`n" + $log + "`n``````"
+            Set-Content -Path build_log.md -Value $body -Encoding utf8
+            Get-Content build_log.txt | Select-Object -Last 60
+          }
+
+      - name: Report failure as issue
+        if: steps.build.outcome == 'failure'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --title "CI build failed" --body-file build_log.md
+          gh issue list
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_log.txt
+          if-no-files-found: warn
+
+      - name: Upload exe
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: WindowsKeyboardIntegrityCheck
           path: build/WindowsKeyboardIntegrityCheck.exe
           if-no-files-found: error
+
+      - name: Fail the job if the build failed
+        if: steps.build.outcome == 'failure'
+        run: exit 1

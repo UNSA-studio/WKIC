@@ -8,6 +8,7 @@
     <AssemblyName>WindowsKeyboardIntegrityCheck</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <LangVersion>5</LangVersion>
+    <CodePage>65001</CodePage>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Optimize>true</Optimize>
