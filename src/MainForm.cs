@@ -764,6 +764,15 @@ namespace WinKbdCheck
             _pbInfo.Style = ProgressBarStyle.Marquee;
             _pbInfo.MarqueeAnimationSpeed = 28;
             _lblInfoTitle.Text = "正在采集键盘设备、驱动与系统信息……";
+
+            // 把窗口创建之前（句柄尚未就绪）记录的日志补进列表框
+            _lbInfoLog.Items.Clear();
+            lock (_timeline)
+            {
+                for (int i = 0; i < _timeline.Count; i++)
+                    _lbInfoLog.Items.Add(_timeline[i].ToString());
+            }
+
             UpdateNav();
 
             Thread t = new Thread(new ThreadStart(CollectWorker));
