@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -68,6 +68,22 @@ jobs:
           name: WindowsKeyboardIntegrityCheck
           path: build/WindowsKeyboardIntegrityCheck.exe
           if-no-files-found: error
+
+      - name: Publish exe to dist/ (raw download link)
+        if: steps.build.outcome == 'success' && !contains(github.event.head_commit.message, '[skip ci]')
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/WindowsKeyboardIntegrityCheck.exe dist/WindowsKeyboardIntegrityCheck.exe
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f dist/WindowsKeyboardIntegrityCheck.exe
+          if git diff --cached --quiet; then
+            echo "dist unchanged, nothing to publish"
+            exit 0
+          fi
+          git commit -m "chore: publish built exe [skip ci]"
+          git push
 
       - name: Fail the job if the build failed
         if: steps.build.outcome == 'failure'
