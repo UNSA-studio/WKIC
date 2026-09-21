@@ -20,6 +20,7 @@ namespace WinKbdCheck
             public KeyDef Def;
             public bool IsDown;
             public bool WasCaptured;
+            public bool TimedOut;          // 引导期间超时未响应
             public int DownCount;
             public DateTime FirstDown = DateTime.MinValue;
             public DateTime LastDown = DateTime.MinValue;
@@ -43,6 +44,10 @@ namespace WinKbdCheck
         private Color _accentDown = Color.FromArgb(0, 90, 158);
         private string _hoverText;
         private ToolTip _tip;
+
+        // ---- 引导模式状态 ----
+        private int _guideKeyId;       // 0 = 无引导
+        private bool _guideFlash = true;
 
         public event EventHandler<KeyState> KeyCaptured;
 
@@ -125,13 +130,61 @@ namespace WinKbdCheck
                 KeyState s = _states[i];
                 s.IsDown = false;
                 s.WasCaptured = false;
+                s.TimedOut = false;
                 s.DownCount = 0;
                 s.FirstDown = DateTime.MinValue;
                 s.LastDown = DateTime.MinValue;
                 s.HoldStart = DateTime.MinValue;
                 s.TotalHoldMs = 0;
             }
+            _guideKeyId = 0;
+            _guideFlash = true;
             Invalidate();
+        }
+
+        /* ---------------- 引导模式 ---------------- */
+
+        /// <summary>当前被高亮引导、等待用户按下的按键 Id；0 表示没有引导目标。</summary>
+        public int GuideKeyId
+        {
+            get { return _guideKeyId; }
+        }
+
+        /// <summary>设置引导目标。传 0 清除引导。会自动只重绘受影响的两个键。</summary>
+        public void SetGuide(int keyId)
+        {
+            if (_guideKeyId == keyId)
+                return;
+            int old = _guideKeyId;
+            _guideKeyId = keyId;
+            _guideFlash = true;
+            InvalidateKeyById(old);
+            InvalidateKeyById(_guideKeyId);
+        }
+
+        /// <summary>切换引导键的闪烁相位。</summary>
+        public void SetFlash(bool on)
+        {
+            if (_guideFlash == on)
+                return;
+            _guideFlash = on;
+            InvalidateKeyById(_guideKeyId);
+        }
+
+        public void RefreshKey(KeyState st)
+        {
+            if (st == null)
+                return;
+            Invalidate(RectOf(st.Def));
+        }
+
+        private void InvalidateKeyById(int keyId)
+        {
+            if (keyId == 0)
+                return;
+            KeyState st;
+            if (_stateById.TryGetValue(keyId, out st))
+                Invalidate(RectOf(st.Def));
         }
 
         /// <summary>
@@ -237,13 +290,59 @@ namespace WinKbdCheck
             {
                 KeyState st = _states[i];
                 Rectangle r = RectOf(st.Def);
+                bool guide = (st.Def.Id == _guideKeyId);
 
                 if (st.WasCaptured)
                     DrawCapturedKey(g, r, st);
+                else if (guide)
+                    DrawGuideKey(g, r);
+                else if (st.TimedOut)
+                    DrawTimedOutKey(g, r);
                 else
                     DrawNativeKey(g, r, st.IsDown);
 
-                DrawKeyText(g, r, st);
+                DrawKeyText(g, r, st, guide);
+            }
+        }
+
+        /// <summary>当前被引导、等待按下的键：主题色闪烁（实心 ↔ 描边）。</summary>
+        private void DrawGuideKey(Graphics g, Rectangle r)
+        {
+            if (_guideFlash)
+            {
+                using (SolidBrush brush = new SolidBrush(_accent))
+                {
+                    g.FillRectangle(brush, r);
+                }
+                using (Pen pen = new Pen(ControlPaint.Dark(_accent, 0.30f)))
+                {
+                    g.DrawRectangle(pen, r.X, r.Y, r.Width - 1, r.Height - 1);
+                }
+            }
+            else
+            {
+                using (SolidBrush brush = new SolidBrush(Color.FromArgb(60, _accent)))
+                {
+                    g.FillRectangle(brush, r);
+                }
+                using (Pen pen = new Pen(_accent, 2f))
+                {
+                    g.DrawRectangle(pen, r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
+                }
+            }
+        }
+
+        /// <summary>引导期间超时未响应的键：灰底点线框，与"尚未检测"区分开。</summary>
+        private void DrawTimedOutKey(Graphics g, Rectangle r)
+        {
+            using (SolidBrush brush = new SolidBrush(SystemColors.Control))
+            {
+                g.FillRectangle(brush, r);
+            }
+            using (Pen pen = new Pen(SystemColors.ControlDark))
+            {
+                pen.DashStyle = DashStyle.Dot;
+                g.DrawRectangle(pen, r.X, r.Y, r.Width - 1, r.Height - 1);
             }
         }
 
@@ -320,10 +419,19 @@ namespace WinKbdCheck
             return path;
         }
 
-        private void DrawKeyText(Graphics g, Rectangle r, KeyState st)
+        private void DrawKeyText(Graphics g, Rectangle r, KeyState st, bool guide)
         {
             KeyDef k = st.Def;
-            Color color = st.WasCaptured ? Color.White : SystemColors.ControlText;
+
+            Color color;
+            if (st.WasCaptured)
+                color = Color.White;
+            else if (guide)
+                color = _guideFlash ? Color.White : _accent;
+            else if (st.TimedOut)
+                color = SystemColors.GrayText;
+            else
+                color = SystemColors.ControlText;
 
             // 短标签（1~3 个字符）用正常字号；长标签用略小字号避免溢出
             string label = k.Label;

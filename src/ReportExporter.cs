@@ -45,13 +45,22 @@ namespace WinKbdCheck
             int captured = panel.CapturedKeyCount;
             double percent = total == 0 ? 0 : (captured * 100.0 / total);
 
+            int skipped = 0;
+            foreach (KeyboardPanel.KeyState s in panel.States)
+            {
+                if (!s.WasCaptured && s.TimedOut)
+                    skipped++;
+            }
+
             sb.AppendLine(thin);
             sb.AppendLine("一、总体结论");
             sb.AppendLine(thin);
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
                 "键盘总键位数 : {0}", total));
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                "成功捕获键位 : {0}", captured));
+                "成功点亮键位 : {0}", captured));
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
+                "超时跳过键位 : {0}", skipped));
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
                 "覆盖率       : {0:F2}%", percent));
             sb.AppendLine("判定结果     : " + Verdict(captured, total));
@@ -59,7 +68,7 @@ namespace WinKbdCheck
 
             /* ---------- 未捕获键位 ---------- */
             sb.AppendLine(thin);
-            sb.AppendLine("二、未捕获 / 无响应键位");
+            sb.AppendLine("二、未点亮 / 无响应键位");
             sb.AppendLine(thin);
             List<KeyboardPanel.KeyState> missing = new List<KeyboardPanel.KeyState>();
             foreach (KeyboardPanel.KeyState st in panel.States)
@@ -74,8 +83,9 @@ namespace WinKbdCheck
                 foreach (KeyboardPanel.KeyState st in missing)
                 {
                     sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                        "  · {0,-22} VK=0x{1:X2} ({2})",
-                        st.Def.Name, st.Def.Vk, KeyboardLayout.VirtualKeyName(st.Def.Vk)));
+                        "  · {0,-22} VK=0x{1:X2}  ({2}){3}",
+                        st.Def.Name, st.Def.Vk, KeyboardLayout.VirtualKeyName(st.Def.Vk),
+                        st.TimedOut ? "   [引导 3 秒内未响应，已自动跳过]" : ""));
                 }
             }
             sb.AppendLine();

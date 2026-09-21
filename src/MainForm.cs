@@ -56,6 +56,8 @@ namespace WinKbdCheck
         private ListView _lvMissing;
         private TextBox _txtLive;
         private Label _lblNowKey;
+        private Label _lblTarget;
+        private Button _btnFinish;
 
         /* ---------- 第 4 步 ---------- */
         private Label _lblVerdict;
@@ -83,6 +85,20 @@ namespace WinKbdCheck
         private bool _modCtrl;
         private bool _modAlt;
         private bool _modShift;
+
+        /* ---------- 引导式检测流程 ---------- */
+        private List<KeyboardPanel.KeyState> _testQueue = new List<KeyboardPanel.KeyState>();
+        private int _testIndex;
+        private System.Windows.Forms.Timer _guideTimer;
+        private int _guideElapsedMs;
+        private int _skippedCount;
+        private DateTime _lastReturnDown = DateTime.MinValue;
+
+        /// <summary>单个键的响应窗口：超过这个时间没有按下就自动跳到下一个。</summary>
+        private const int GuideTimeoutMs = 3000;
+
+        /// <summary>双击回车判定窗口。</summary>
+        private const int DoubleReturnMs = 450;
 
         public MainForm()
         {
@@ -276,7 +292,11 @@ namespace WinKbdCheck
                 "检测过程分为 4 个步骤：\r\n" +
                 "    1)  欢迎与风险告知\r\n" +
                 "    2)  采集键盘设备、驱动与年代信息（详细过程会实时显示）\r\n" +
-                "    3)  逐键按压检测：按下一个键，键盘图上对应的键就变成当前系统主题色\r\n" +
+                "    3)  引导式逐键检测：键盘图上会闪烁提示下一个该按的键，\r\n" +
+                "        按对后该键会完全点亮并变成当前系统主题色，然后自动进入下一个；\r\n" +
+                "        如果 3 秒内没有按下，会自动跳到下一个键。\r\n" +
+                "        全部按完后自动结束；也可以随时双击回车键结束检测，\r\n" +
+                "        或者（回车键坏掉时）用鼠标点击左下角的『完成检测』按钮。\r\n" +
                 "    4)  生成总结报告，可导出为文本文件\r\n" +
                 "\r\n" +
                 "关于『接管键盘』：\r\n" +
@@ -363,7 +383,7 @@ namespace WinKbdCheck
             _lblTestHint = new Label();
             _lblTestHint.AutoSize = true;
             _lblTestHint.Location = new Point(24, 8);
-            _lblTestHint.Text = "请依次按下键盘上的每一个按键（按一次即可）。捕获成功的键会立即变成系统主题色。";
+            _lblTestHint.Text = "键盘图中闪烁的那个键就是下一个要按的键。按对后它会完全点亮并自动进入下一个；3 秒无响应会自动跳过。";
 
             _pbTest = new ProgressBar();
             _pbTest.Location = new Point(26, 32);
@@ -398,9 +418,15 @@ namespace WinKbdCheck
             {
                 if (_keyboard == null) return;
                 _keyboard.ResetAll();
+                _skippedCount = 0;
+                _testIndex = 0;
+                _guideElapsedMs = 0;
                 _testStart = DateTime.Now;
+                _lvMissing.Tag = null;
                 RefreshTestProgress();
-                Log("检测", "检测结果已重置，重新开始计时。");
+                if (_testing)
+                    AdvanceGuide();
+                Log("检测", "检测结果已重置，重新从第一个键开始引导。");
             };
 
             _btnStopNow = new Button();
@@ -416,6 +442,14 @@ namespace WinKbdCheck
             bar.Controls.Add(_chkBlock);
             bar.Controls.Add(_btnReset);
             bar.Controls.Add(_btnStopNow);
+
+            /* 引导目标提示（大字） */
+            _lblTarget = new Label();
+            _lblTarget.AutoSize = false;
+            _lblTarget.TextAlign = ContentAlignment.MiddleCenter;
+            _lblTarget.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 12.5f, FontStyle.Regular);
+            _lblTarget.BackColor = SystemColors.Control;
+            _lblTarget.Text = "准备开始……";
 
             /* 键盘区域 */
             _kbdHost = new Panel();
@@ -436,7 +470,7 @@ namespace WinKbdCheck
             _testSplit = split;
 
             GroupBox gbMissing = new GroupBox();
-            gbMissing.Text = "尚未捕获的按键（请逐个尝试按下）";
+            gbMissing.Text = "尚未完成检测的按键";
             gbMissing.Dock = DockStyle.Fill;
 
             _lvMissing = new ListView();
@@ -445,10 +479,29 @@ namespace WinKbdCheck
             _lvMissing.FullRowSelect = true;
             _lvMissing.GridLines = false;
             _lvMissing.HideSelection = false;
+            _lvMissing.Columns.Add("顺序", 60);
             _lvMissing.Columns.Add("键位", 170);
             _lvMissing.Columns.Add("虚拟键码", 90);
-            _lvMissing.Columns.Add("区域", 90);
+            _lvMissing.Columns.Add("区域", 100);
             gbMissing.Controls.Add(_lvMissing);
+
+            _btnFinish = new Button();
+            _btnFinish.Text = "完成检测";
+            _btnFinish.Dock = DockStyle.Fill;
+            _btnFinish.Click += delegate { FinishTest(false); };
+
+            // 左下角的"完成检测"：双击回车坏掉时的鼠标兜底出口
+            TableLayoutPanel leftGrid = new TableLayoutPanel();
+            leftGrid.Dock = DockStyle.Fill;
+            leftGrid.ColumnCount = 2;
+            leftGrid.RowCount = 2;
+            leftGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150f));
+            leftGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            leftGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            leftGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+            leftGrid.Controls.Add(gbMissing, 0, 0);
+            leftGrid.SetColumnSpan(gbMissing, 2);
+            leftGrid.Controls.Add(_btnFinish, 0, 1);
 
             GroupBox gbLive = new GroupBox();
             gbLive.Text = "实时按键反馈";
@@ -476,11 +529,12 @@ namespace WinKbdCheck
             liveHost.Controls.Add(_lblNowKey);
             gbLive.Controls.Add(liveHost);
 
-            split.Panel1.Controls.Add(gbMissing);
+            split.Panel1.Controls.Add(leftGrid);
             split.Panel2.Controls.Add(gbLive);
 
             _pageTest.Controls.Add(split);
             _pageTest.Controls.Add(_kbdHost);
+            _pageTest.Controls.Add(_lblTarget);
             _pageTest.Controls.Add(bar);
 
             _pageTest.Resize += delegate { LayoutTestPage(); };
@@ -490,7 +544,8 @@ namespace WinKbdCheck
         /// <summary>检测页内部布局：工具条 + 键盘图 + 详情区，按像素手动排布。</summary>
         private void LayoutTestPage()
         {
-            if (_pageTest == null || _testBar == null || _testSplit == null || _kbdHost == null)
+            if (_pageTest == null || _testBar == null || _testSplit == null ||
+                _kbdHost == null || _lblTarget == null)
                 return;
 
             int w = _pageTest.ClientSize.Width;
@@ -499,15 +554,17 @@ namespace WinKbdCheck
                 return;
 
             const int barH = 62;
+            const int targetH = 40;
             const int kbdH = 300;
 
             _testBar.SetBounds(0, 0, w, barH);
-            _kbdHost.SetBounds(0, barH, w, kbdH);
+            _lblTarget.SetBounds(0, barH, w, targetH);
+            _kbdHost.SetBounds(0, barH + targetH, w, kbdH);
 
-            int bottomH = h - barH - kbdH;
+            int bottomH = h - barH - targetH - kbdH;
             if (bottomH < 140)
                 bottomH = 140;
-            _testSplit.SetBounds(0, barH + kbdH, w, bottomH);
+            _testSplit.SetBounds(0, barH + targetH + kbdH, w, bottomH);
 
             int leftW = (int)(w * 0.58);
             int minLeft = _testSplit.Panel1MinSize;
@@ -654,11 +711,15 @@ namespace WinKbdCheck
 
         private void GoToStep(int step)
         {
-            // 离开检测页时确保解除接管
+            // 离开检测页时确保解除接管并停止引导心跳
             if (_step == 2 && step != 2)
             {
                 if (_hook != null)
                     _hook.IsBlocking = false;
+                if (_guideTimer != null)
+                    _guideTimer.Stop();
+                if (_keyboard != null)
+                    _keyboard.SetGuide(0);
                 _testing = false;
             }
 
@@ -852,44 +913,141 @@ namespace WinKbdCheck
             _tested = true;
             _testStart = DateTime.Now;
             _modCtrl = _modAlt = _modShift = false;
+            _lastReturnDown = DateTime.MinValue;
+            _skippedCount = 0;
 
             if (_hook != null)
                 _hook.IsBlocking = _chkBlock.Checked;
 
+            // 按键盘图顺序建立引导队列
+            _testQueue = new List<KeyboardPanel.KeyState>();
+            for (int i = 0; i < _keyboard.States.Count; i++)
+                _testQueue.Add(_keyboard.States[i]);
+            _testIndex = 0;
+            _guideElapsedMs = 0;
+
+            if (_guideTimer == null)
+            {
+                _guideTimer = new System.Windows.Forms.Timer();
+                _guideTimer.Interval = 100;
+                _guideTimer.Tick += delegate { OnGuideTick(); };
+            }
+            _guideTimer.Start();
+
             LayoutKeyboard();
-            RefreshTestProgress();
+            AdvanceGuide();
 
-            Log("检测", "=== 逐键检测开始（" + DateTime.Now.ToString("HH:mm:ss.fff") + "）===");
+            Log("检测", "=== 引导式逐键检测开始（" + DateTime.Now.ToString("HH:mm:ss.fff") + "）===");
             Log("检测", "键盘接管状态：" + (_chkBlock.Checked ? "已开启" : "已关闭") +
-                "；共需检测 " + _keyboard.TotalKeyCount + " 个键位。");
-            Log("检测", "紧急停止组合键：Ctrl + Alt + Shift + Q");
+                "；引导队列 " + _testQueue.Count + " 个键位，单键响应窗口 " +
+                (GuideTimeoutMs / 1000) + " 秒。");
+            Log("检测", "结束方式：双击回车 / 点击左下角『完成检测』/ Ctrl+Alt+Shift+Q 紧急停止。");
 
-            AppendLive("检测开始。请依次按下每一个按键。");
+            AppendLive("引导式检测开始。请按闪烁提示逐个按键。");
             _lblNowKey.Text = "当前按键：—";
-            _lblTestHint.Text = "请依次按下键盘上的每一个按键（按一次即可）。按 Ctrl+Alt+Shift+Q 可紧急停止。";
+        }
+
+        /// <summary>前进到下一个尚未完成的引导键；队列走完则自动结束检测。</summary>
+        private void AdvanceGuide()
+        {
+            if (!_testing || _keyboard == null)
+                return;
+
+            // 跳过用户在自由按压阶段已经点亮过的键
+            while (_testIndex < _testQueue.Count && _testQueue[_testIndex].WasCaptured)
+                _testIndex++;
+
+            if (_testIndex >= _testQueue.Count)
+            {
+                _keyboard.SetGuide(0);
+                _lblTarget.Text = "全部按键已走完，正在生成总结报告……";
+                FinishTest(false);
+                return;
+            }
+
+            _guideElapsedMs = 0;
+            _keyboard.SetGuide(_testQueue[_testIndex].Def.Id);
+            UpdateTargetLabel();
+            RefreshTestProgress();
+        }
+
+        private void UpdateTargetLabel()
+        {
+            if (_keyboard == null || _testQueue == null)
+                return;
+            if (_testIndex >= _testQueue.Count)
+                return;
+
+            KeyboardPanel.KeyState st = _testQueue[_testIndex];
+            int remain = GuideTimeoutMs - _guideElapsedMs;
+            if (remain < 0) remain = 0;
+
+            _lblTarget.Text = string.Format(CultureInfo.InvariantCulture,
+                "请按下：  {0}      剩余 {1:F1} 秒      [ 第 {2} / {3} 个 ]",
+                st.Def.Name, remain / 1000.0, _testIndex + 1, _testQueue.Count);
+        }
+
+        /// <summary>100ms 心跳：驱动引导键闪烁 + 3 秒超时自动跳过。</summary>
+        private void OnGuideTick()
+        {
+            if (!_testing || _keyboard == null || _testQueue == null)
+                return;
+            if (_testIndex >= _testQueue.Count)
+                return;
+
+            _guideElapsedMs += 100;
+
+            // 每 500ms 切换一次闪烁相位
+            _keyboard.SetFlash(((_guideElapsedMs / 500) % 2) == 0);
+            UpdateTargetLabel();
+
+            if (_guideElapsedMs < GuideTimeoutMs)
+                return;
+
+            KeyboardPanel.KeyState st = _testQueue[_testIndex];
+            if (!st.WasCaptured)
+            {
+                st.TimedOut = true;
+                _skippedCount++;
+                _keyboard.RefreshKey(st);
+                AppendLive("超时跳过  " + st.Def.Name + "  （" +
+                    (GuideTimeoutMs / 1000) + " 秒内未收到硬件反馈）");
+                Log("跳过", "键位 " + st.Def.Name + " 在 " +
+                    (GuideTimeoutMs / 1000) + " 秒内未响应，已自动跳到下一个。");
+            }
+
+            _testIndex++;
+            AdvanceGuide();
         }
 
         private void FinishTest(bool emergency)
         {
-            if (!_testing)
+            if (_guideTimer != null)
+                _guideTimer.Stop();
+            if (_keyboard != null)
+                _keyboard.SetGuide(0);
+
+            if (_testing)
             {
-                if (_step == 2)
-                    GoToStep(3);
-                return;
+                _testing = false;
+                _testEnd = DateTime.Now;
+                if (_hook != null)
+                    _hook.IsBlocking = false;   // 立即归还键盘控制权
+
+                Log("检测", "=== 引导式逐键检测结束（" +
+                    (_testEnd - _testStart).TotalSeconds.ToString("F2") + " 秒）===");
+                Log("检测", "已完成 " + _keyboard.CapturedKeyCount + " / " +
+                    _keyboard.TotalKeyCount + " 个键位，自动跳过 " + _skippedCount + " 个。");
+                if (emergency)
+                    Log("检测", "用户使用紧急组合键中止了接管。");
+
+                AppendLive("检测结束。已完成 " + _keyboard.CapturedKeyCount + " / " +
+                    _keyboard.TotalKeyCount + "，跳过 " + _skippedCount + "。");
+                _lblTarget.Text = "检测已结束，正在生成总结报告……";
             }
 
-            _testing = false;
-            _testEnd = DateTime.Now;
-            if (_hook != null)
-                _hook.IsBlocking = false;   // 立即归还键盘控制权
-
-            Log("检测", "=== 逐键检测结束（" + (_testEnd - _testStart).TotalSeconds.ToString("F2") +
-                " 秒）===");
-            Log("检测", "已捕获 " + _keyboard.CapturedKeyCount + " / " + _keyboard.TotalKeyCount + " 个键位。");
-            if (emergency)
-                Log("检测", "用户使用紧急组合键中止了接管。");
-
-            GoToStep(3);
+            if (_step == 2)
+                GoToStep(3);
         }
 
         private void OnKeyboardEvent(object sender, KeyboardHookEventArgs e)
@@ -911,6 +1069,20 @@ namespace WinKbdCheck
 
             if (!_testing || _keyboard == null)
                 return;
+
+            // 双击回车 = 结束检测（回车坏掉时用左下角『完成检测』按钮）
+            if (e.IsDown && e.VirtualKey == 0x0D)
+            {
+                DateTime now = DateTime.Now;
+                if ((now - _lastReturnDown).TotalMilliseconds <= DoubleReturnMs)
+                {
+                    AppendLive("检测到双击回车 —— 结束检测。");
+                    Log("检测", "用户双击回车，主动结束检测。");
+                    FinishTest(false);
+                    return;
+                }
+                _lastReturnDown = now;
+            }
 
             KeyboardPanel.KeyState st = _keyboard.HandleKey(
                 e.VirtualKey, e.ScanCode, e.IsExtended, e.IsDown, e.IsInjected);
@@ -937,10 +1109,17 @@ namespace WinKbdCheck
 
         private void OnKeyCaptured(object sender, KeyboardPanel.KeyState st)
         {
-            AppendLive("已捕获  " + st.Def.Name + "   (VK=0x" + st.Def.Vk.ToString("X2") +
-                ", 总进度 " + _keyboard.CapturedKeyCount + "/" + _keyboard.TotalKeyCount + ")");
-            Log("捕获", "键位 " + st.Def.Name + " 首次收到硬件反馈。");
+            bool wasGuide = (_keyboard != null && st.Def.Id == _keyboard.GuideKeyId);
+
+            AppendLive("已点亮  " + st.Def.Name + "   (VK=0x" + st.Def.Vk.ToString("X2") +
+                ", 进度 " + _keyboard.CapturedKeyCount + "/" + _keyboard.TotalKeyCount + ")");
+            Log("捕获", "键位 " + st.Def.Name + " 收到硬件反馈，已点亮。");
+
             RefreshTestProgress();
+
+            // 按下的正是当前引导键 → 立即进入下一个
+            if (wasGuide && _testing)
+                AdvanceGuide();
         }
 
         private void RefreshTestProgress()
@@ -957,12 +1136,10 @@ namespace WinKbdCheck
 
             double pct = total == 0 ? 0 : (done * 100.0 / total);
             _lblTestProgress.Text = string.Format(CultureInfo.InvariantCulture,
-                "已捕获 {0} / {1}   ({2:F1}%)", done, total, pct);
+                "已点亮 {0} / {1}   ({2:F1}%)    ·    已跳过 {3}",
+                done, total, pct, _skippedCount);
 
             RefreshMissingList();
-
-            if (done >= total && _testing)
-                FinishTest(false);
         }
 
         private void RefreshMissingList()
@@ -970,12 +1147,11 @@ namespace WinKbdCheck
             if (_lvMissing == null || _keyboard == null)
                 return;
 
-            // 简单节流：仅在数量变化时重建
-            int missingCount = _keyboard.TotalKeyCount - _keyboard.CapturedKeyCount;
-            if (_lvMissing.Items.Count == missingCount &&
-                _lvMissing.Tag != null && (int)_lvMissing.Tag == _keyboard.CapturedKeyCount)
+            // 简单节流：状态签名没变就不重建
+            string sig = _keyboard.CapturedKeyCount + "/" + _skippedCount;
+            if ((_lvMissing.Tag as string) == sig)
                 return;
-            _lvMissing.Tag = _keyboard.CapturedKeyCount;
+            _lvMissing.Tag = sig;
 
             _lvMissing.BeginUpdate();
             try
@@ -985,9 +1161,14 @@ namespace WinKbdCheck
                 {
                     if (st.WasCaptured)
                         continue;
-                    ListViewItem it = new ListViewItem(st.Def.Name);
+
+                    ListViewItem it = new ListViewItem(
+                        st.Def.Id.ToString(CultureInfo.InvariantCulture));
+                    it.SubItems.Add(st.Def.Name);
                     it.SubItems.Add("0x" + st.Def.Vk.ToString("X2"));
                     it.SubItems.Add(RegionOf(st.Def));
+                    if (st.TimedOut)
+                        it.ForeColor = SystemColors.GrayText;
                     _lvMissing.Items.Add(it);
                 }
             }
@@ -1086,7 +1267,15 @@ namespace WinKbdCheck
                     it.SubItems.Add(st.FirstDown == DateTime.MinValue
                         ? "—" : st.FirstDown.ToString("HH:mm:ss.fff"));
                     it.SubItems.Add(st.TotalHoldMs.ToString("F0", CultureInfo.InvariantCulture));
-                    it.SubItems.Add(st.WasCaptured ? "已捕获" : "无响应");
+
+                    string state;
+                    if (st.WasCaptured)
+                        state = "已点亮";
+                    else if (st.TimedOut)
+                        state = "超时跳过";
+                    else
+                        state = "未检测";
+                    it.SubItems.Add(state);
 
                     if (!st.WasCaptured)
                         it.ForeColor = Color.FromArgb(180, 0, 0);
@@ -1353,6 +1542,13 @@ namespace WinKbdCheck
                 _hook.Uninstall();
                 _hook.Dispose();
                 _hook = null;
+            }
+
+            if (_guideTimer != null)
+            {
+                _guideTimer.Stop();
+                _guideTimer.Dispose();
+                _guideTimer = null;
             }
 
             base.OnFormClosing(e);
