@@ -30,7 +30,7 @@ namespace WinKbdCheck
             public bool LastInjected;
         }
 
-        private const int Margin = 6;
+        private const int PadMargin = 6;
         private const int Gap = 3;
 
         private readonly List<KeyState> _states = new List<KeyState>();
@@ -203,20 +203,20 @@ namespace WinKbdCheck
 
         private double CellWidth
         {
-            get { return (Width - 2.0 * Margin) / KeyboardLayout.TotalUnitsX; }
+            get { return (Width - 2.0 * PadMargin) / KeyboardLayout.TotalUnitsX; }
         }
 
         private double CellHeight
         {
-            get { return (Height - 2.0 * Margin) / KeyboardLayout.TotalUnitsY; }
+            get { return (Height - 2.0 * PadMargin) / KeyboardLayout.TotalUnitsY; }
         }
 
         private Rectangle RectOf(KeyDef k)
         {
             double cw = CellWidth;
             double ch = CellHeight;
-            int x = (int)Math.Round(Margin + k.X * cw) + Gap / 2;
-            int y = (int)Math.Round(Margin + k.Y * ch) + Gap / 2;
+            int x = (int)Math.Round(PadMargin + k.X * cw) + Gap / 2;
+            int y = (int)Math.Round(PadMargin + k.Y * ch) + Gap / 2;
             int w = (int)Math.Round(k.W * cw) - Gap;
             int h = (int)Math.Round(k.H * ch) - Gap;
             if (w < 4) w = 4;

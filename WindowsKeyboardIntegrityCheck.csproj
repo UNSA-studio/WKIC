@@ -11,6 +11,7 @@
     <CodePage>65001</CodePage>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
     <Optimize>true</Optimize>
     <DebugType>none</DebugType>
     <WarningLevel>4</WarningLevel>

@@ -726,7 +726,14 @@ namespace WinKbdCheck
                         System.Diagnostics.FileVersionInfo fvi =
                             System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
                         ver = fvi.FileVersion;
-                        date = fvi.FileDate.ToString("yyyy-MM-dd");
+                        try
+                        {
+                            date = System.IO.File.GetLastWriteTime(path).ToString("yyyy-MM-dd");
+                        }
+                        catch
+                        {
+                            date = "-";
+                        }
                     }
 
                     rows.Add(new string[] { svc, path == null ? "未知路径" : path, ver, date });
