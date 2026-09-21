@@ -1,12 +1,22 @@
 # Windows Keyboard Integrity Check
 
 **Windows 键盘完整性检测** — 逐键按压检测你的键盘，记录每个按键是否被系统成功接收到硬件反馈，并采集键盘设备、驱动与年代信息。
-
 界面使用 WinForms + Windows 原生视觉样式渲染（`ButtonRenderer` / `DrawThemeBackground`），控件外观与系统原生控件一致，不自绘仿制品。
 
 ---
 
+## 直接下载
+
+已编译好的 exe（每次推送自动构建）：
+
+**https://raw.githubusercontent.com/UNSA-studio/WKIC/main/dist/WindowsKeyboardIntegrityCheck.exe**
+
+> 右键「另存为」下载。建议保存后右键 → **以管理员身份运行**。
+
+---
+
 ## 功能
+
 
 | 需求 | 实现方式 |
 | --- | --- |
