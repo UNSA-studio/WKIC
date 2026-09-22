@@ -31,8 +31,9 @@ namespace WinKbdCheck
             public bool LastInjected;
         }
 
-        private const int PadMargin = 6;
-        private const int Gap = 3;
+        // 以下尺寸会随 DPI 缩放；字体统一由 Dpi.MakeFont 生成
+        private int PadMargin { get { return Dpi.Px(6); } }
+        private int Gap { get { return Dpi.Px(3); } }
 
         private readonly List<KeyState> _states = new List<KeyState>();
         private readonly Dictionary<int, KeyState> _stateById = new Dictionary<int, KeyState>();
@@ -59,9 +60,9 @@ namespace WinKbdCheck
                      ControlStyles.ResizeRedraw, true);
             BackColor = SystemColors.Control;
 
-            _fontLabel = new Font("Segoe UI", 8.0f, FontStyle.Regular);
-            _fontSmall = new Font("Segoe UI", 6.5f, FontStyle.Regular);
-            _fontSub = new Font("Segoe UI", 6.5f, FontStyle.Regular);
+            _fontLabel = Dpi.MakeFont(8.0f);
+            _fontSmall = Dpi.MakeFont(6.5f);
+            _fontSub = Dpi.MakeFont(6.5f);
 
             _tip = new ToolTip();
             _tip.InitialDelay = 600;
@@ -272,8 +273,9 @@ namespace WinKbdCheck
             int y = (int)Math.Round(PadMargin + k.Y * ch) + Gap / 2;
             int w = (int)Math.Round(k.W * cw) - Gap;
             int h = (int)Math.Round(k.H * ch) - Gap;
-            if (w < 4) w = 4;
-            if (h < 4) h = 4;
+            int minSide = Dpi.Px(4);
+            if (w < minSide) w = minSide;
+            if (h < minSide) h = minSide;
             return new Rectangle(x, y, w, h);
         }
 
@@ -325,7 +327,7 @@ namespace WinKbdCheck
                 {
                     g.FillRectangle(brush, r);
                 }
-                using (Pen pen = new Pen(_accent, 2f))
+                using (Pen pen = new Pen(_accent, Dpi.Px(2)))
                 {
                     g.DrawRectangle(pen, r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
                 }
@@ -379,9 +381,11 @@ namespace WinKbdCheck
             Color fill = st.IsDown ? _accentDown : _accent;
             Color border = ControlPaint.Dark(_accent, 0.30f);
 
+            int radius = Dpi.Px(3);
+
             using (SolidBrush brush = new SolidBrush(fill))
             {
-                using (GraphicsPath path = RoundedRect(r, 3))
+                using (GraphicsPath path = RoundedRect(r, radius))
                 {
                     g.FillPath(brush, path);
                 }
@@ -389,7 +393,7 @@ namespace WinKbdCheck
 
             using (Pen pen = new Pen(border))
             {
-                using (GraphicsPath path = RoundedRect(r, 3))
+                using (GraphicsPath path = RoundedRect(r, radius))
                 {
                     g.DrawPath(pen, path);
                 }
@@ -398,7 +402,9 @@ namespace WinKbdCheck
             // 顶部 1px 高光，让高亮键看起来有立体感（与原生按钮质感一致）
             using (Pen pen = new Pen(Color.FromArgb(70, 255, 255, 255)))
             {
-                g.DrawLine(pen, r.Left + 3, r.Top + 2, r.Right - 4, r.Top + 2);
+                g.DrawLine(pen,
+                    r.Left + radius, r.Top + Dpi.Px(2),
+                    r.Right - radius - 1, r.Top + Dpi.Px(2));
             }
         }
 
@@ -444,12 +450,16 @@ namespace WinKbdCheck
             if (k.Sub != null && k.Sub.Length > 0)
             {
                 // 副字符画在左上角，主字符居中
-                Rectangle subRect = new Rectangle(r.Left + 3, r.Top + 1, r.Width - 6, 12);
+                Rectangle subRect = new Rectangle(
+                    r.Left + Dpi.Px(3), r.Top + Dpi.Px(1),
+                    r.Width - Dpi.Px(6), Dpi.Px(12));
                 TextRenderer.DrawText(g, k.Sub, _fontSub, subRect, color,
                     TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.NoPadding |
                     TextFormatFlags.EndEllipsis);
 
-                textRect = new Rectangle(r.Left + 1, r.Top + 5, r.Width - 2, r.Height - 6);
+                textRect = new Rectangle(
+                    r.Left + Dpi.Px(1), r.Top + Dpi.Px(5),
+                    r.Width - Dpi.Px(2), r.Height - Dpi.Px(6));
             }
 
             TextRenderer.DrawText(g, label, mainFont, textRect, color,

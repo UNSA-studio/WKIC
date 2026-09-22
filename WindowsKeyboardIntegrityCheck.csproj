@@ -9,6 +9,7 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <LangVersion>5</LangVersion>
     <CodePage>65001</CodePage>
+    <ApplicationIcon>assets\app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>

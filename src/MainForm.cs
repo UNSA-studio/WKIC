@@ -121,7 +121,44 @@ namespace WinKbdCheck
             }
 
             _sysInfo = null;
+
+            // 界面全部构建完成后，按 DPI 统一缩放整棵控件树的布局属性
+            Dpi.ScaleTree(this);
+            ClampToScreen();
+
             GoToStep(0);
+        }
+
+        /// <summary>
+        /// 把窗口尺寸限制在屏幕工作区内。
+        /// 1180×820 在 150% 缩放下会变成 1770×1230，1080p 屏根本放不下，
+        /// 这里连带把 MinimumSize 一起收窄，避免窗口比屏幕还大。
+        /// </summary>
+        private void ClampToScreen()
+        {
+            Rectangle wa;
+            try
+            {
+                wa = Screen.PrimaryScreen.WorkingArea;
+            }
+            catch
+            {
+                return;
+            }
+
+            int maxW = Math.Max(Dpi.Px(640), wa.Width - Dpi.Px(30));
+            int maxH = Math.Max(Dpi.Px(480), wa.Height - Dpi.Px(30));
+
+            int minW = Math.Min(MinimumSize.Width, maxW);
+            int minH = Math.Min(MinimumSize.Height, maxH);
+            MinimumSize = new Size(minW, minH);
+
+            int w = Math.Min(ClientSize.Width, maxW);
+            int h = Math.Min(ClientSize.Height, maxH);
+            if (w < minW) w = minW;
+            if (h < minH) h = minH;
+
+            ClientSize = new Size(w, h);
         }
 
         /* ====================================================================
@@ -131,14 +168,17 @@ namespace WinKbdCheck
         private void BuildUi()
         {
             Text = Program.AppTitle + "  —  " + Program.AppTitleCn;
-            Font = SystemFonts.MessageBoxFont;
+
+            // 关闭 WinForms 自带的自动缩放：本程序的所有坐标都以 96 DPI 为基准手工编写，
+            // 尺寸走 Dpi.Px()、字体走 Dpi.MakeFont()，全程序只有一套缩放置。
+            // （AutoScaleMode.Dpi 只缩放布局属性、不缩放 Font，且会被 OnResize 里的
+            //   动态布局覆盖回去，所以这里必须关掉。）
+            AutoScaleMode = AutoScaleMode.None;
+            Font = Dpi.MakeFont(9f);
+
             StartPosition = FormStartPosition.CenterScreen;
 
-            // 高 DPI：本程序所有坐标均以 96 DPI 为基准手工排版，
-            // 交给 WinForms 按当前屏幕 DPI 整体缩放，保证高分屏下布局不失真。
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-
+            // 下面是 96 DPI 基准值，实际尺寸由 Dpi.ScaleTree 统一放大
             ClientSize = new Size(1180, 820);
             MinimumSize = new Size(1024, 720);
             BackColor = SystemColors.Control;
@@ -152,7 +192,7 @@ namespace WinKbdCheck
 
             _lblHeaderTitle = new Label();
             _lblHeaderTitle.Text = "Windows 键盘完整性检测";
-            _lblHeaderTitle.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 13.5f, FontStyle.Regular);
+            _lblHeaderTitle.Font = Dpi.MakeFont(13.5f);
             _lblHeaderTitle.AutoSize = true;
             _lblHeaderTitle.Location = new Point(18, 10);
 
@@ -230,8 +270,8 @@ namespace WinKbdCheck
             if (_header == null || _footer == null || _stage == null)
                 return;
 
-            const int headerH = 66;
-            const int footerH = 58;
+            int headerH = Dpi.Px(66);
+            int footerH = Dpi.Px(58);
 
             int w = ClientSize.Width;
             int h = ClientSize.Height;
@@ -356,7 +396,7 @@ namespace WinKbdCheck
             _lbInfoLog = new ListBox();
             _lbInfoLog.Dock = DockStyle.Fill;
             _lbInfoLog.IntegralHeight = false;
-            _lbInfoLog.Font = new Font("Consolas", 8.5f);
+            _lbInfoLog.Font = Dpi.MakeFont("Consolas", 8.5f, FontStyle.Regular);
             _lbInfoLog.HorizontalScrollbar = true;
             box.Controls.Add(_lbInfoLog);
 
@@ -447,7 +487,7 @@ namespace WinKbdCheck
             _lblTarget = new Label();
             _lblTarget.AutoSize = false;
             _lblTarget.TextAlign = ContentAlignment.MiddleCenter;
-            _lblTarget.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 12.5f, FontStyle.Regular);
+            _lblTarget.Font = Dpi.MakeFont(12.5f);
             _lblTarget.BackColor = SystemColors.Control;
             _lblTarget.Text = "准备开始……";
 
@@ -522,7 +562,7 @@ namespace WinKbdCheck
             _txtLive.ReadOnly = true;
             _txtLive.ScrollBars = ScrollBars.Vertical;
             _txtLive.WordWrap = false;
-            _txtLive.Font = new Font("Consolas", 8.5f);
+            _txtLive.Font = Dpi.MakeFont("Consolas", 8.5f, FontStyle.Regular);
             _txtLive.MaxLength = 1000000;
 
             liveHost.Controls.Add(_txtLive);
@@ -553,17 +593,18 @@ namespace WinKbdCheck
             if (w <= 0 || h <= 0)
                 return;
 
-            const int barH = 62;
-            const int targetH = 40;
-            const int kbdH = 300;
+            int barH = Dpi.Px(62);
+            int targetH = Dpi.Px(40);
+            int kbdH = Dpi.Px(300);
 
             _testBar.SetBounds(0, 0, w, barH);
             _lblTarget.SetBounds(0, barH, w, targetH);
             _kbdHost.SetBounds(0, barH + targetH, w, kbdH);
 
+            int minBottom = Dpi.Px(140);
             int bottomH = h - barH - targetH - kbdH;
-            if (bottomH < 140)
-                bottomH = 140;
+            if (bottomH < minBottom)
+                bottomH = minBottom;
             _testSplit.SetBounds(0, barH + targetH + kbdH, w, bottomH);
 
             int leftW = (int)(w * 0.58);
@@ -591,8 +632,8 @@ namespace WinKbdCheck
             if (_keyboard == null || _kbdHost == null)
                 return;
 
-            int hostW = _kbdHost.ClientSize.Width - 24;
-            int hostH = _kbdHost.ClientSize.Height - 12;
+            int hostW = _kbdHost.ClientSize.Width - Dpi.Px(24);
+            int hostH = _kbdHost.ClientSize.Height - Dpi.Px(12);
             if (hostW < 200 || hostH < 60)
                 return;
 
@@ -624,7 +665,7 @@ namespace WinKbdCheck
             _lblVerdict.Location = new Point(24, 10);
             _lblVerdict.Size = new Size(1124, 46);
             _lblVerdict.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            _lblVerdict.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 10.5f, FontStyle.Regular);
+            _lblVerdict.Font = Dpi.MakeFont(10.5f);
             _lblVerdict.TextAlign = ContentAlignment.MiddleLeft;
 
             _tabs = new TabControl();
@@ -668,7 +709,7 @@ namespace WinKbdCheck
             _txtTimeline.ReadOnly = true;
             _txtTimeline.ScrollBars = ScrollBars.Both;
             _txtTimeline.WordWrap = false;
-            _txtTimeline.Font = new Font("Consolas", 8.5f);
+            _txtTimeline.Font = Dpi.MakeFont("Consolas", 8.5f, FontStyle.Regular);
             tpLog.Controls.Add(_txtTimeline);
 
             _tabs.TabPages.Add(tpKeys);

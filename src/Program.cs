@@ -17,6 +17,9 @@ namespace WinKbdCheck
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // 统一 DPI 基准：全程序的尺寸与字体都从这里取缩放系数
+            Dpi.Init();
+
             Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e)
             {
                 MessageBox.Show(
