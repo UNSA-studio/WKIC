@@ -15,6 +15,20 @@ namespace WinKbdCheck
     /// </summary>
     internal sealed class KeyboardPanel : Control
     {
+        /// <summary>键盘图的两种用途。</summary>
+        internal enum PanelMode
+        {
+            /// <summary>检测中：引导键闪烁，捕获成功的键点亮。</summary>
+            Test,
+            /// <summary>结果展示：按完好 / 跳过 / 无响应着色，可点击查看该键的检测记录。</summary>
+            Result
+        }
+
+        // 结果模式的三色语义（取自 Windows 系统色板）
+        private static readonly Color ResultOk = Color.FromArgb(0x10, 0x7C, 0x10);       // 完好
+        private static readonly Color ResultSkipped = Color.FromArgb(0x9D, 0x5D, 0x00);  // 引导超时跳过
+        private static readonly Color ResultBad = Color.FromArgb(0xC4, 0x2B, 0x1C);      // 无响应
+
         internal sealed class KeyState
         {
             public KeyDef Def;
@@ -50,7 +64,14 @@ namespace WinKbdCheck
         private int _guideKeyId;       // 0 = 无引导
         private bool _guideFlash = true;
 
+        // ---- 结果展示模式状态 ----
+        private PanelMode _mode = PanelMode.Test;
+        private int _selectedKeyId;
+
         public event EventHandler<KeyState> KeyCaptured;
+
+        /// <summary>在键盘图上点击某个键（总结页用来查看该键的检测记录）。</summary>
+        public event EventHandler<KeyState> KeyClicked;
 
         public KeyboardPanel()
         {
@@ -172,6 +193,34 @@ namespace WinKbdCheck
             InvalidateKeyById(_guideKeyId);
         }
 
+        /// <summary>切换键盘图的用途（检测中 / 结果展示）。</summary>
+        public PanelMode Mode
+        {
+            get { return _mode; }
+            set
+            {
+                if (_mode != value)
+                {
+                    _mode = value;
+                    Invalidate();
+                }
+            }
+        }
+
+        /// <summary>结果模式下当前被选中查看的键 Id。</summary>
+        public int SelectedKeyId
+        {
+            get { return _selectedKeyId; }
+            set
+            {
+                if (_selectedKeyId != value)
+                {
+                    _selectedKeyId = value;
+                    Invalidate();
+                }
+            }
+        }
+
         public void RefreshKey(KeyState st)
         {
             if (st == null)
@@ -288,13 +337,18 @@ namespace WinKbdCheck
             g.Clear(BackColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
+            bool resultMode = (_mode == PanelMode.Result);
+
             for (int i = 0; i < _states.Count; i++)
             {
                 KeyState st = _states[i];
                 Rectangle r = RectOf(st.Def);
-                bool guide = (st.Def.Id == _guideKeyId);
+                bool guide = (!resultMode && st.Def.Id == _guideKeyId);
+                bool selected = (resultMode && st.Def.Id == _selectedKeyId);
 
-                if (st.WasCaptured)
+                if (resultMode)
+                    DrawResultKey(g, r, st, selected);
+                else if (st.WasCaptured)
                     DrawCapturedKey(g, r, st);
                 else if (guide)
                     DrawGuideKey(g, r);
@@ -303,7 +357,45 @@ namespace WinKbdCheck
                 else
                     DrawNativeKey(g, r, st.IsDown);
 
-                DrawKeyText(g, r, st, guide);
+                DrawKeyText(g, r, st, guide, resultMode);
+            }
+        }
+
+        /// <summary>结果模式：绿=完好，琥珀=引导超时跳过，红=无响应；选中的键加粗边框。</summary>
+        private void DrawResultKey(Graphics g, Rectangle r, KeyState st, bool selected)
+        {
+            Color fill;
+            if (st.WasCaptured)
+                fill = ResultOk;
+            else if (st.TimedOut)
+                fill = ResultSkipped;
+            else
+                fill = ResultBad;
+
+            int radius = Dpi.Px(3);
+
+            using (SolidBrush brush = new SolidBrush(fill))
+            {
+                using (GraphicsPath path = RoundedRect(r, radius))
+                {
+                    g.FillPath(brush, path);
+                }
+            }
+
+            using (Pen pen = new Pen(ControlPaint.Dark(fill, 0.30f)))
+            {
+                using (GraphicsPath path = RoundedRect(r, radius))
+                {
+                    g.DrawPath(pen, path);
+                }
+            }
+
+            if (selected)
+            {
+                using (Pen pen = new Pen(Color.Black, Dpi.Px(2)))
+                {
+                    g.DrawRectangle(pen, r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
+                }
             }
         }
 
@@ -425,12 +517,14 @@ namespace WinKbdCheck
             return path;
         }
 
-        private void DrawKeyText(Graphics g, Rectangle r, KeyState st, bool guide)
+        private void DrawKeyText(Graphics g, Rectangle r, KeyState st, bool guide, bool resultMode)
         {
             KeyDef k = st.Def;
 
             Color color;
-            if (st.WasCaptured)
+            if (resultMode)
+                color = Color.White;
+            else if (st.WasCaptured)
                 color = Color.White;
             else if (guide)
                 color = _guideFlash ? Color.White : _accent;
@@ -467,6 +561,35 @@ namespace WinKbdCheck
                 TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         }
 
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            KeyState hit = HitTest(e.Location);
+            if (hit == null)
+                return;
+
+            _selectedKeyId = hit.Def.Id;
+            Invalidate();
+
+            EventHandler<KeyState> handler = KeyClicked;
+            if (handler != null)
+                handler(this, hit);
+        }
+
+        private KeyState HitTest(Point p)
+        {
+            for (int i = 0; i < _states.Count; i++)
+            {
+                if (RectOf(_states[i].Def).Contains(p))
+                    return _states[i];
+            }
+            return null;
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
@@ -480,6 +603,9 @@ namespace WinKbdCheck
                     break;
                 }
             }
+
+            if (_mode == PanelMode.Result)
+                Cursor = (text != null) ? Cursors.Hand : Cursors.Default;
 
             if (text != _hoverText)
             {

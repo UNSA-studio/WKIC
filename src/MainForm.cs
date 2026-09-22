@@ -15,7 +15,7 @@ namespace WinKbdCheck
     ///   2. 逐键检测（接管全部键盘输入，捕获成功的键变成系统主题色）
     ///   3. 总结报告（设备详情、年代推断、逐键明细、完整时间线、导出）
     /// </summary>
-    internal sealed class MainForm : Form
+    internal sealed partial class MainForm : Form
     {
         /* ---------- 骨架 ---------- */
         private Panel _header;
@@ -59,20 +59,22 @@ namespace WinKbdCheck
         private Label _lblTarget;
         private Button _btnFinish;
 
-        /* ---------- 第 4 步 ---------- */
+        /* ---------- 第 4 步：结果展示 ---------- */
         private Label _lblVerdict;
-        private TabControl _tabs;
-        private ListView _lvResultKeys;
-        private ListView _lvDevices;
-        private ListView _lvSysInfo;
-        private ListView _lvDrivers;
-        private TextBox _txtTimeline;
+        private TableLayoutPanel _summaryGrid;
+        private ListView _lvOverview;        // 左上角：检测数据 / 当前用户 / 硬件信息
+        private Panel _kbdResultHost;
+        private KeyboardPanel _kbdResult;    // 结果键盘图（可点击）
+        private Label _lblLegend;
+        private ListView _lvKeyDetail;       // 点击某个键后显示的记录
         private Button _btnExport;
+        private Button _btnRestart;
 
         /* ---------- 数据 ---------- */
         private readonly List<TimelineEntry> _timeline = new List<TimelineEntry>();
         private List<KeyboardDeviceInfo> _devices = new List<KeyboardDeviceInfo>();
         private SystemKeyboardInfo _sysInfo;
+        private MachineInfo _machine = new MachineInfo();
         private List<string[]> _driverRows = new List<string[]>();
 
         private KeyboardHook _hook;
@@ -288,6 +290,7 @@ namespace WinKbdCheck
             base.OnResize(e);
             LayoutShell();
             LayoutTestPage();
+            LayoutResultKeyboard();
         }
 
         private void HeaderPaint(object sender, PaintEventArgs e)
@@ -652,84 +655,6 @@ namespace WinKbdCheck
                 (_kbdHost.ClientSize.Height - h) / 2);
         }
 
-        /* ---------------- 第 3 步：总结 ---------------- */
-
-        private void BuildSummaryPage()
-        {
-            _pageSummary = new Panel();
-            _pageSummary.Dock = DockStyle.Fill;
-            _pageSummary.BackColor = SystemColors.Control;
-
-            _lblVerdict = new Label();
-            _lblVerdict.AutoSize = false;
-            _lblVerdict.Location = new Point(24, 10);
-            _lblVerdict.Size = new Size(1124, 46);
-            _lblVerdict.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            _lblVerdict.Font = Dpi.MakeFont(10.5f);
-            _lblVerdict.TextAlign = ContentAlignment.MiddleLeft;
-
-            _tabs = new TabControl();
-            _tabs.Location = new Point(24, 62);
-            _tabs.Size = new Size(1124, 580);
-            _tabs.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
-            /* Tab 1：逐键结果 */
-            TabPage tpKeys = new TabPage("检测结果");
-            tpKeys.UseVisualStyleBackColor = true;
-            _lvResultKeys = MakeListView(new string[] {
-                "键位", "虚拟键码", "扫描码", "按下次数", "首次按下", "累计按住(ms)", "状态"
-            }, new int[] { 170, 90, 80, 80, 120, 120, 90 });
-            tpKeys.Controls.Add(_lvResultKeys);
-
-            /* Tab 2：设备 */
-            TabPage tpDev = new TabPage("键盘设备");
-            tpDev.UseVisualStyleBackColor = true;
-            _lvDevices = MakeListView(new string[] { "属性", "值" }, new int[] { 180, 900 });
-            tpDev.Controls.Add(_lvDevices);
-
-            /* Tab 3：系统 */
-            TabPage tpSys = new TabPage("系统键盘参数");
-            tpSys.UseVisualStyleBackColor = true;
-            _lvSysInfo = MakeListView(new string[] { "属性", "值" }, new int[] { 180, 900 });
-            tpSys.Controls.Add(_lvSysInfo);
-
-            /* Tab 4：驱动 */
-            TabPage tpDrv = new TabPage("驱动文件");
-            tpDrv.UseVisualStyleBackColor = true;
-            _lvDrivers = MakeListView(new string[] { "服务名", "文件路径", "版本", "日期" },
-                new int[] { 130, 480, 200, 120 });
-            tpDrv.Controls.Add(_lvDrivers);
-
-            /* Tab 5：时间线 */
-            TabPage tpLog = new TabPage("完整过程");
-            tpLog.UseVisualStyleBackColor = true;
-            _txtTimeline = new TextBox();
-            _txtTimeline.Dock = DockStyle.Fill;
-            _txtTimeline.Multiline = true;
-            _txtTimeline.ReadOnly = true;
-            _txtTimeline.ScrollBars = ScrollBars.Both;
-            _txtTimeline.WordWrap = false;
-            _txtTimeline.Font = Dpi.MakeFont("Consolas", 8.5f, FontStyle.Regular);
-            tpLog.Controls.Add(_txtTimeline);
-
-            _tabs.TabPages.Add(tpKeys);
-            _tabs.TabPages.Add(tpDev);
-            _tabs.TabPages.Add(tpSys);
-            _tabs.TabPages.Add(tpDrv);
-            _tabs.TabPages.Add(tpLog);
-
-            _btnExport = new Button();
-            _btnExport.Text = "导出报告(&E)…";
-            _btnExport.Size = new Size(130, 26);
-            _btnExport.Location = new Point(1018, 650);
-            _btnExport.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            _btnExport.Click += delegate { ExportReport(); };
-
-            _pageSummary.Controls.Add(_lblVerdict);
-            _pageSummary.Controls.Add(_tabs);
-            _pageSummary.Controls.Add(_btnExport);
-        }
-
         private static ListView MakeListView(string[] headers, int[] widths)
         {
             ListView lv = new ListView();
@@ -914,6 +839,9 @@ namespace WinKbdCheck
                 DeviceInfoCollector.CollectKeyboardDriverFiles(
                     new DeviceInfoCollector.LogHandler(Log), rows);
                 _driverRows = rows;
+
+                Log("步骤", "【5/5】读取当前用户、用户组与硬件概况……");
+                _machine = DeviceInfoCollector.CollectMachineInfo(new DeviceInfoCollector.LogHandler(Log));
 
                 Log("完成", "信息采集完成，共发现 " + _devices.Count + " 个键盘设备。");
             }
@@ -1245,239 +1173,6 @@ namespace WinKbdCheck
          *  总结页面
          * ==================================================================== */
 
-        private void PopulateSummary()
-        {
-            if (_keyboard == null)
-                return;
-
-            int total = _keyboard.TotalKeyCount;
-            int captured = _keyboard.CapturedKeyCount;
-            double pct = total == 0 ? 0 : (captured * 100.0 / total);
-
-            TimeSpan dur = (_tested && _testEnd > _testStart)
-                ? (_testEnd - _testStart)
-                : TimeSpan.Zero;
-
-            /* 结论横幅 */
-            if (captured >= total && total > 0)
-            {
-                _lblVerdict.ForeColor = Color.FromArgb(0, 110, 40);
-                _lblVerdict.Text = string.Format(CultureInfo.InvariantCulture,
-                    "✔ 检测通过 —— 全部 {0} 个键位均收到硬件反馈，键盘完整性良好。（耗时 {1}）",
-                    total, ReportExporter.FormatDuration(dur));
-            }
-            else if (captured == 0)
-            {
-                _lblVerdict.ForeColor = Color.FromArgb(160, 100, 0);
-                _lblVerdict.Text = "⚠ 未产生有效检测数据，请重新进行逐键检测。";
-            }
-            else
-            {
-                _lblVerdict.ForeColor = Color.FromArgb(170, 30, 30);
-                _lblVerdict.Text = string.Format(CultureInfo.InvariantCulture,
-                    "✖ 检测未通过 —— {0} / {1} 个键位有反馈（{2:F1}%），剩余 {3} 个键位未收到反馈。（耗时 {4}）",
-                    captured, total, pct, total - captured, ReportExporter.FormatDuration(dur));
-            }
-
-            FillResultKeys();
-            FillDevices();
-            FillSysInfo();
-            FillDrivers();
-            FillTimeline();
-        }
-
-        private void FillResultKeys()
-        {
-            _lvResultKeys.BeginUpdate();
-            try
-            {
-                _lvResultKeys.Items.Clear();
-
-                List<KeyboardPanel.KeyState> all = new List<KeyboardPanel.KeyState>(_keyboard.States);
-                all.Sort(delegate(KeyboardPanel.KeyState a, KeyboardPanel.KeyState b)
-                {
-                    return a.Def.Id.CompareTo(b.Def.Id);
-                });
-
-                foreach (KeyboardPanel.KeyState st in all)
-                {
-                    ListViewItem it = new ListViewItem(st.Def.Name);
-                    it.SubItems.Add("0x" + st.Def.Vk.ToString("X2"));
-                    it.SubItems.Add("0x" + st.LastScanCode.ToString("X2"));
-                    it.SubItems.Add(st.DownCount.ToString(CultureInfo.InvariantCulture));
-                    it.SubItems.Add(st.FirstDown == DateTime.MinValue
-                        ? "—" : st.FirstDown.ToString("HH:mm:ss.fff"));
-                    it.SubItems.Add(st.TotalHoldMs.ToString("F0", CultureInfo.InvariantCulture));
-
-                    string state;
-                    if (st.WasCaptured)
-                        state = "已点亮";
-                    else if (st.TimedOut)
-                        state = "超时跳过";
-                    else
-                        state = "未检测";
-                    it.SubItems.Add(state);
-
-                    if (!st.WasCaptured)
-                        it.ForeColor = Color.FromArgb(180, 0, 0);
-
-                    _lvResultKeys.Items.Add(it);
-                }
-            }
-            finally
-            {
-                _lvResultKeys.EndUpdate();
-            }
-        }
-
-        private void FillDevices()
-        {
-            _lvDevices.BeginUpdate();
-            try
-            {
-                _lvDevices.Items.Clear();
-                _lvDevices.Groups.Clear();
-                _lvDevices.ShowGroups = true;
-
-                if (_devices == null || _devices.Count == 0)
-                {
-                    _lvDevices.Items.Add(new ListViewItem(new string[] {
-                        "提示", "未枚举到 RawInput 键盘设备（可能被安全软件拦截）。" }));
-                    return;
-                }
-
-                for (int i = 0; i < _devices.Count; i++)
-                {
-                    KeyboardDeviceInfo d = _devices[i];
-                    ListViewGroup g = new ListViewGroup("设备 " + (i + 1) + "：" + d.ShortName);
-                    _lvDevices.Groups.Add(g);
-
-                    AddPair(_lvDevices, g, "设备名称", d.ShortName);
-                    AddPair(_lvDevices, g, "连接类型", d.ConnectionType);
-                    AddPair(_lvDevices, g, "厂商 VID", (d.VendorId.Length > 0 ? d.VendorId : "未知") + "  " + d.VendorName);
-                    AddPair(_lvDevices, g, "产品 PID", d.ProductId.Length > 0 ? d.ProductId : "未知");
-                    AddPair(_lvDevices, g, "修订版本 REV", d.Revision.Length > 0 ? d.Revision : "未知");
-                    AddPair(_lvDevices, g, "设备路径", d.DevicePath);
-                    AddPair(_lvDevices, g, "硬件 ID", d.HardwareIds.Length > 0 ? d.HardwareIds : (d.PnpDeviceId.Length > 0 ? d.PnpDeviceId : "未知"));
-                    AddPair(_lvDevices, g, "PnP 实体名称", d.PnpName.Length > 0 ? d.PnpName : "未知");
-                    AddPair(_lvDevices, g, "PnP 制造商", d.PnpManufacturer.Length > 0 ? d.PnpManufacturer : "未知");
-                    AddPair(_lvDevices, g, "PnP 类别", d.PnpClass.Length > 0 ? d.PnpClass : "未知");
-                    AddPair(_lvDevices, g, "内核服务", d.Service.Length > 0 ? d.Service : "未知");
-                    AddPair(_lvDevices, g, "设备状态", (d.Status.Length > 0 ? d.Status : "未知") +
-                        (d.ConfigManagerErrorCode > 0 ? "（配置管理器错误码 " + d.ConfigManagerErrorCode + "）" : ""));
-                    AddPair(_lvDevices, g, "— 驱动 —", "");
-                    AddPair(_lvDevices, g, "驱动名称", d.DriverName.Length > 0 ? d.DriverName : "未知");
-                    AddPair(_lvDevices, g, "驱动版本", d.DriverVersion.Length > 0 ? d.DriverVersion : "未知");
-                    AddPair(_lvDevices, g, "驱动程序日期（年份）", d.DriverDateText);
-                    AddPair(_lvDevices, g, "驱动提供商", d.DriverProvider.Length > 0 ? d.DriverProvider : "未知");
-                    AddPair(_lvDevices, g, "驱动制造商", d.DriverManufacturer.Length > 0 ? d.DriverManufacturer : "未知");
-                    AddPair(_lvDevices, g, "INF 文件", d.InfName.Length > 0 ? d.InfName : "未知");
-                    AddPair(_lvDevices, g, "数字签名者", d.Signer.Length > 0 ? d.Signer : "未知");
-                    AddPair(_lvDevices, g, "— 硬件规格 —", "");
-                    AddPair(_lvDevices, g, "键盘子类型", d.SubType.ToString(CultureInfo.InvariantCulture));
-                    AddPair(_lvDevices, g, "键盘模式", d.KeyboardMode.ToString(CultureInfo.InvariantCulture));
-                    AddPair(_lvDevices, g, "功能键数量", d.NumberOfFunctionKeys.ToString(CultureInfo.InvariantCulture));
-                    AddPair(_lvDevices, g, "指示灯数量", d.NumberOfIndicators.ToString(CultureInfo.InvariantCulture));
-                    AddPair(_lvDevices, g, "按键总数", d.NumberOfKeysTotal.ToString(CultureInfo.InvariantCulture));
-                    AddPair(_lvDevices, g, "— 时代判定 —", "");
-                    AddPair(_lvDevices, g, "接口时代", d.InterfaceEra);
-                    AddPair(_lvDevices, g, "驱动年代", d.DriverAge);
-                }
-            }
-            finally
-            {
-                _lvDevices.EndUpdate();
-            }
-        }
-
-        private static void AddPair(ListView lv, ListViewGroup group, string key, string value)
-        {
-            ListViewItem it = new ListViewItem(key);
-            it.SubItems.Add(value == null ? "" : value);
-            it.Group = group;
-            lv.Items.Add(it);
-        }
-
-        private void FillSysInfo()
-        {
-            _lvSysInfo.BeginUpdate();
-            try
-            {
-                _lvSysInfo.Items.Clear();
-                if (_sysInfo == null)
-                {
-                    _lvSysInfo.Items.Add(new ListViewItem(new string[] { "提示", "未能读取系统键盘参数。" }));
-                    return;
-                }
-
-                AddPair2("Windows 版本", _sysInfo.WindowsVersion);
-                AddPair2("键盘类型 (GetKeyboardType 0)", _sysInfo.KeyboardType +
-                    "  " + ReportExporter.KeyboardTypeText(_sysInfo.KeyboardType));
-                AddPair2("键盘子类型 (1)", _sysInfo.KeyboardSubType.ToString(CultureInfo.InvariantCulture));
-                AddPair2("功能键数量 (2)", _sysInfo.FunctionKeyCount.ToString(CultureInfo.InvariantCulture));
-                AddPair2("当前键盘布局 KLID", _sysInfo.KeyboardLayoutId);
-                AddPair2("键盘类驱动服务", _sysInfo.KbdClassService);
-                AddPair2("BIOS 日期", _sysInfo.BiosDate);
-                AddPair2("OEM 厂商", _sysInfo.Manufacturer);
-                AddPair2("机型", _sysInfo.Model);
-
-                if (!string.IsNullOrEmpty(_sysInfo.InstalledLayouts))
-                {
-                    string[] ls = _sysInfo.InstalledLayouts.Split(
-                        new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                    for (int i = 0; i < ls.Length; i++)
-                        AddPair2("已安装键盘布局 [" + (i + 1) + "]", ls[i]);
-                }
-            }
-            finally
-            {
-                _lvSysInfo.EndUpdate();
-            }
-        }
-
-        private void AddPair2(string key, string value)
-        {
-            ListViewItem it = new ListViewItem(key);
-            it.SubItems.Add(value == null ? "" : value);
-            _lvSysInfo.Items.Add(it);
-        }
-
-        private void FillDrivers()
-        {
-            _lvDrivers.BeginUpdate();
-            try
-            {
-                _lvDrivers.Items.Clear();
-                if (_driverRows == null || _driverRows.Count == 0)
-                {
-                    _lvDrivers.Items.Add(new ListViewItem(new string[] {
-                        "提示", "未读取到键盘相关驱动信息。", "-", "-" }));
-                    return;
-                }
-                foreach (string[] row in _driverRows)
-                {
-                    if (row == null || row.Length < 4)
-                        continue;
-                    _lvDrivers.Items.Add(new ListViewItem(row));
-                }
-            }
-            finally
-            {
-                _lvDrivers.EndUpdate();
-            }
-        }
-
-        private void FillTimeline()
-        {
-            List<string> lines = new List<string>();
-            lock (_timeline)
-            {
-                for (int i = 0; i < _timeline.Count; i++)
-                    lines.Add(_timeline[i].ToString());
-            }
-            _txtTimeline.Lines = lines.ToArray();
-        }
-
         /* ====================================================================
          *  导出
          * ==================================================================== */
@@ -1559,6 +1254,10 @@ namespace WinKbdCheck
         {
             base.OnShown(e);
             LayoutKeyboard();
+            LayoutResultKeyboard();
+
+            // 触摸屏：给所有列表 / 文本框挂上拖动滚动
+            TouchScroll.Enable(this);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

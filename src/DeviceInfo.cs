@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32;
 
@@ -98,6 +99,24 @@ namespace WinKbdCheck
                 return "未知";
             }
         }
+    }
+
+    /// <summary>机器与当前用户环境信息（结果页左上角用）。</summary>
+    internal sealed class MachineInfo
+    {
+        public string UserName = "";          // DOMAIN\user
+        public string Account = "";           // 纯用户名
+        public string Domain = "";
+        public bool IsAdmin;
+        public List<string> Groups = new List<string>();
+
+        public string ComputerName = "";
+        public string OsVersion = "";
+        public string Cpu = "";
+        public string RamTotal = "";
+        public string BaseBoard = "";
+        public string SystemModel = "";
+        public string BiosDate = "";
     }
 
     /// <summary>系统级键盘参数（来自 user32 + 注册表）。</summary>
@@ -684,6 +703,156 @@ namespace WinKbdCheck
             }
 
             return si;
+        }
+
+        /* ==================== 机器 / 用户环境信息 ==================== */
+
+        /// <summary>采集当前用户、用户组与机器硬件概况（结果页左上角用）。</summary>
+        public static MachineInfo CollectMachineInfo(LogHandler log)
+        {
+            MachineInfo mi = new MachineInfo();
+
+            try
+            {
+                mi.ComputerName = Environment.MachineName;
+                mi.OsVersion = Environment.OSVersion.VersionString + "  (" +
+                    (Environment.Is64BitOperatingSystem ? "64 位系统" : "32 位系统") + ")";
+            }
+            catch
+            {
+            }
+
+            /* ---- 当前用户与用户组 ---- */
+            try
+            {
+                using (WindowsIdentity id = WindowsIdentity.GetCurrent())
+                {
+                    mi.UserName = id.Name;
+                    int slash = mi.UserName.IndexOf('\\');
+                    if (slash > 0)
+                    {
+                        mi.Domain = mi.UserName.Substring(0, slash);
+                        mi.Account = mi.UserName.Substring(slash + 1);
+                    }
+                    else
+                    {
+                        mi.Account = mi.UserName;
+                    }
+
+                    mi.IsAdmin = new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
+
+                    IdentityReferenceCollection groups = id.Groups;
+                    if (groups != null)
+                    {
+                        for (int i = 0; i < groups.Count; i++)
+                        {
+                            string name = null;
+                            try
+                            {
+                                IdentityReference ir = groups[i];
+                                NTAccount acc = ir.Translate(typeof(NTAccount)) as NTAccount;
+                                name = (acc != null) ? acc.Value : ir.Value;
+                            }
+                            catch
+                            {
+                                try { name = groups[i].Value; }
+                                catch { }
+                            }
+
+                            if (!string.IsNullOrEmpty(name) && !mi.Groups.Contains(name))
+                                mi.Groups.Add(name);
+                        }
+                    }
+                }
+
+                if (log != null)
+                    log("用户", "当前账户 " + mi.UserName + "，所属用户组 " + mi.Groups.Count + " 个");
+            }
+            catch (Exception ex)
+            {
+                if (log != null)
+                    log("用户", "读取用户信息失败：" + ex.Message);
+            }
+
+            /* ---- 硬件概况 ---- */
+            mi.Cpu = QuerySingle("SELECT Name FROM Win32_Processor", "Name", log, "CPU");
+
+            mi.SystemModel = Trim(
+                QuerySingle("SELECT Manufacturer FROM Win32_ComputerSystem", "Manufacturer", null, null) + " " +
+                QuerySingle("SELECT Model FROM Win32_ComputerSystem", "Model", null, null));
+
+            mi.BaseBoard = Trim(
+                QuerySingle("SELECT Manufacturer FROM Win32_BaseBoard", "Manufacturer", null, null) + " " +
+                QuerySingle("SELECT Product FROM Win32_BaseBoard", "Product", null, null));
+
+            try
+            {
+                string ram = QuerySingle("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem",
+                    "TotalPhysicalMemory", null, null);
+                if (!string.IsNullOrEmpty(ram))
+                {
+                    ulong bytes;
+                    if (ulong.TryParse(ram, NumberStyles.Integer, CultureInfo.InvariantCulture, out bytes))
+                        mi.RamTotal = string.Format(CultureInfo.InvariantCulture,
+                            "{0:F1} GB", bytes / 1073741824.0);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                using (RegistryKey k = Registry.LocalMachine.OpenSubKey(
+                    @"HARDWARE\DESCRIPTION\System\BIOS", false))
+                {
+                    if (k != null)
+                    {
+                        object bd = k.GetValue("BIOSReleaseDate");
+                        if (bd != null)
+                            mi.BiosDate = bd.ToString();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return mi;
+        }
+
+        private static string Trim(string s)
+        {
+            return s == null ? "" : s.Trim();
+        }
+
+        private static string QuerySingle(string wql, string prop, LogHandler log, string label)
+        {
+            try
+            {
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(wql);
+                searcher.Options.Timeout = new TimeSpan(0, 0, 20);
+
+                foreach (ManagementBaseObject mo in searcher.Get())
+                {
+                    object v = mo[prop];
+                    if (v == null)
+                        continue;
+                    string text = v.ToString().Trim();
+                    if (text.Length == 0)
+                        continue;
+
+                    if (log != null && label != null)
+                        log("硬件", label + " = " + text);
+                    return text;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (log != null && label != null)
+                    log("硬件", label + " 查询失败：" + ex.Message);
+            }
+            return "";
         }
 
         /* ==================== 键盘类驱动文件信息 ==================== */
