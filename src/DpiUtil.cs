@@ -148,18 +148,19 @@ namespace WinKbdCheck
                 }
 
                 // TableLayoutPanel 的绝对尺寸行/列
+                // 注意：ColumnStyle 用 Width，RowStyle 用 Height，没有 Size 属性
                 TableLayoutPanel tlp = c as TableLayoutPanel;
                 if (tlp != null)
                 {
                     for (int j = 0; j < tlp.ColumnStyles.Count; j++)
                     {
                         if (tlp.ColumnStyles[j].SizeType == SizeType.Absolute)
-                            tlp.ColumnStyles[j].Size = PxF(tlp.ColumnStyles[j].Size);
+                            tlp.ColumnStyles[j].Width = PxF(tlp.ColumnStyles[j].Width);
                     }
                     for (int j = 0; j < tlp.RowStyles.Count; j++)
                     {
                         if (tlp.RowStyles[j].SizeType == SizeType.Absolute)
-                            tlp.RowStyles[j].Size = PxF(tlp.RowStyles[j].Size);
+                            tlp.RowStyles[j].Height = PxF(tlp.RowStyles[j].Height);
                     }
                 }
             }
