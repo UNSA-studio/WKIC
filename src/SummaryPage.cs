@@ -219,6 +219,15 @@ namespace WinKbdCheck
             FillKeyDetail(st);
         }
 
+        /// <summary>往带分组的 ListView 里加一行「项目 / 值」。</summary>
+        private static void AddPair(ListView lv, ListViewGroup group, string key, string value)
+        {
+            ListViewItem it = new ListViewItem(key);
+            it.SubItems.Add(value == null ? "" : value);
+            it.Group = group;
+            lv.Items.Add(it);
+        }
+
         private void AddDetail(string key, string value)
         {
             ListViewItem it = new ListViewItem(key);
