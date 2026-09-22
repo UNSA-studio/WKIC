@@ -163,23 +163,32 @@ python tools\make_icon.py
 2. **伪造签名会触发反恶意软件判定。** Windows 验签时会检查证书链与吊销状态，伪造的链会立刻失败；而"带无效签名"正是 SmartScreen / Defender 判定恶意软件的典型特征 —— 结果是自己机器上反而被拦截甚至隔离。
 3. **法律风险。** 冒用他人电子签名属于违法行为。
 
-### 可行的签名方案
+### 本仓库的现状：CI 已自动自签名
 
-| 方案 | 成本 | 效果 |
-| --- | --- | --- |
-| **自签名**（本仓库 `tools/sign.ps1`） | 免费 | 本机可信任；其它机器仍显示"未知发布者" |
-| **Azure Trusted Signing** | 约 $9.99/月，需身份验证 | 微软官方服务，全网可信 |
-| **SignPath.io** | 开源项目免费 | 全网可信 |
-| **Certum / Sectigo OV 代码签名** | 约 $100–200/年 | 全网可信，需实名 |
+每次 CI 构建成功后，会**自动生成一张自签名代码签名证书**并给 exe 签名（SHA-256）。
+这意味着：
 
-自签名用法：
+* exe 的「数字签名」选项卡里**能看到签名者**：`CN=UNSA-studio (self-signed)`；
+* 但因为不是受信任的 CA 签发，状态显示为 **`UnknownError` / 不受信任**，SmartScreen 仍会提示"未知发布者"；
+* 每次构建生成的是**新证书**，所以每次发布的 exe 签名指纹都不同 —— 这是"免费"的代价，正规证书做不到免费。
+
+想让本机不再弹提示，用仓库里的脚本：
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\sign.ps1 -Trust
 ```
 
-`-Trust` 会把自签名证书导入当前用户的「受信任的根证书颁发机构」与「受信任的发布者」，
-之后本机运行就不再弹 SmartScreen 提示。
+### 其它签名方案
+
+| 方案 | 成本 | 效果 |
+| --- | --- | --- |
+| **自签名**（CI 已启用；本地脚本 `tools/sign.ps1`） | 免费 | 本机可信任；其它机器显示"未知发布者" |
+| **Azure Trusted Signing** | 约 $9.99/月，需身份验证 | **微软官方服务**，全网可信 ✓ 推荐 |
+| **SignPath.io** | 开源项目免费 | 全网可信 |
+| **Certum / Sectigo OV 代码签名** | 约 $100–200/年 | 全网可信，需实名 |
+
+若日后买了正规证书，把它转成 base64 放进仓库 Secrets（`SIGNING_PFX` / `SIGNING_PASSWORD`），
+再把 CI 里的自签名步骤换成 `Set-AuthenticodeSignature -Certificate $pfxCert` 即可，其余不用动。
 
 ---
 

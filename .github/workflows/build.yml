@@ -29,6 +29,32 @@ jobs:
             Tee-Object -FilePath build_log.txt
           exit $LASTEXITCODE
 
+      - name: Sign with self-signed certificate
+        if: steps.build.outcome == 'success'
+        shell: pwsh
+        run: |
+          # 免费签名方案：自签名代码签名证书（每次构建生成一张）
+          # 注意：自签名只在导入了对应公钥证书的机器上被信任，
+          #       其它机器仍显示"未知发布者"。这是免费的代价。
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject "CN=UNSA-studio (self-signed), O=UNSA-studio, C=CN" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -NotAfter (Get-Date).AddYears(3) `
+            -KeyUsage DigitalSignature `
+            -KeyAlgorithm RSA `
+            -KeyLength 3072
+          Write-Host "self-signed cert thumbprint: $($cert.Thumbprint)"
+
+          Set-AuthenticodeSignature -FilePath build\WindowsKeyboardIntegrityCheck.exe `
+            -Certificate $cert -HashAlgorithm SHA256 |
+            Format-List Status, StatusMessage
+
+          $sig = Get-AuthenticodeSignature build\WindowsKeyboardIntegrityCheck.exe
+          Write-Host "signature status : $($sig.Status)"
+          Write-Host "signer           : $($sig.SignerCertificate.Subject)"
+          Write-Host "exe size         : $((Get-Item build\WindowsKeyboardIntegrityCheck.exe).Length) bytes"
+
       - name: Show output
         if: steps.build.outcome == 'success'
         run: dir build
