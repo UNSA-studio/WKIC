@@ -139,6 +139,67 @@ WindowsKeyboardIntegrityCheck/
 
 ---
 
+## 图标
+
+应用图标由 `tools/make_icon.py` **用代码绘制**（Microsoft Fluent 风格：圆角渐变底 + 白色键盘），
+不使用任何微软商标资产；输出 16/20/24/32/40/48/64/128/256 九个尺寸，
+每个尺寸独立渲染 + 4× 超采样抗锯齿，全部以 PNG 形式内嵌进 ICO。
+
+重新生成：
+
+```bat
+python tools\make_icon.py
+```
+
+预览：`assets/app_256.png`
+
+---
+
+## 关于软件签名
+
+本程序**没有使用微软的代码签名**，原因不是偷懒：
+
+1. **技术上不可能。** Authenticode 签名需要证书对应的**私钥**。微软的代码签名私钥存放在微软的 HSM（硬件安全模块）中，外部人员无法获取。凡是号称"套用微软签名"的，要么是假签名，要么就是恶意软件。
+2. **伪造签名会触发反恶意软件判定。** Windows 验签时会检查证书链与吊销状态，伪造的链会立刻失败；而"带无效签名"正是 SmartScreen / Defender 判定恶意软件的典型特征 —— 结果是自己机器上反而被拦截甚至隔离。
+3. **法律风险。** 冒用他人电子签名属于违法行为。
+
+### 可行的签名方案
+
+| 方案 | 成本 | 效果 |
+| --- | --- | --- |
+| **自签名**（本仓库 `tools/sign.ps1`） | 免费 | 本机可信任；其它机器仍显示"未知发布者" |
+| **Azure Trusted Signing** | 约 $9.99/月，需身份验证 | 微软官方服务，全网可信 |
+| **SignPath.io** | 开源项目免费 | 全网可信 |
+| **Certum / Sectigo OV 代码签名** | 约 $100–200/年 | 全网可信，需实名 |
+
+自签名用法：
+
+```bat
+powershell -ExecutionPolicy Bypass -File tools\sign.ps1 -Trust
+```
+
+`-Trust` 会把自签名证书导入当前用户的「受信任的根证书颁发机构」与「受信任的发布者」，
+之后本机运行就不再弹 SmartScreen 提示。
+
+---
+
+## 高 DPI
+
+程序**关闭了 WinForms 的 AutoScale**，改为全程序统一一套缩放置：
+
+* 尺寸：所有像素值都过 `Dpi.Px()`，基准是 96 DPI；
+* 字体：所有字体都由 `Dpi.MakeFont()` 生成（内部转成 `GraphicsUnit.Pixel` 再乘缩放系数）；
+* 缩放系数：启动时取 `Graphics.FromHwnd(IntPtr.Zero).DpiX / 96`，只算一次。
+
+之所以不用 `AutoScaleMode.Dpi`：它只缩放控件的布局属性、**不缩放 Font**，
+而本程序的 `LayoutShell()` / `LayoutTestPage()` 又会在 `OnResize` 里用硬编码像素写回尺寸，
+两者互相覆盖，最终高 DPI 下表现为"控件和字体一大一小对不上"。
+
+窗口尺寸另有 `ClampToScreen()`：1180×820 在 150% 缩放下会变成 1770×1230，
+1080p 屏放不下，因此会连带 `MinimumSize` 一起收窄到屏幕工作区以内。
+
+---
+
 ## 运行环境
 
 * Windows 7 SP1 / 8 / 8.1 / 10 / 11
