@@ -62,6 +62,8 @@ namespace WinKbdCheck
             _lvOverview.MultiSelect = false;
             _lvOverview.Columns.Add("项目", 168);
             _lvOverview.Columns.Add("值", 210);
+            // 让"值"列按内容自动撑开：长文本（时间 / CPU 型号等）不再被省略
+            _lvOverview.Columns[1].Width = -2;
 
             /* ---- 右栏：图例 + 键盘图 + 单键记录 ---- */
             TableLayoutPanel rightGrid = new TableLayoutPanel();
@@ -81,11 +83,11 @@ namespace WinKbdCheck
             _kbdResultHost = new Panel();
             _kbdResultHost.Dock = DockStyle.Fill;
             _kbdResultHost.BackColor = SystemColors.Control;
-            _kbdResultHost.Resize += delegate { LayoutResultKeyboard(); };
 
             _kbdResult = new KeyboardPanel();
             _kbdResult.Mode = KeyboardPanel.PanelMode.Result;
             _kbdResult.KeyClicked += OnResultKeyClicked;
+            _kbdResult.Dock = DockStyle.Fill;
             _kbdResultHost.Controls.Add(_kbdResult);
 
             _lvKeyDetail = new ListView();
@@ -97,6 +99,7 @@ namespace WinKbdCheck
             _lvKeyDetail.MultiSelect = false;
             _lvKeyDetail.Columns.Add("项目", 180);
             _lvKeyDetail.Columns.Add("值", 620);
+            _lvKeyDetail.Columns[1].Width = -2;
 
             rightGrid.Controls.Add(_lblLegend, 0, 0);
             rightGrid.Controls.Add(_kbdResultHost, 0, 1);
@@ -141,25 +144,6 @@ namespace WinKbdCheck
             _pageSummary.Controls.Add(_summaryGrid);
         }
 
-        /// <summary>结果页里的键盘图：按 23:6.5 的比例在容器内居中铺满。</summary>
-        private void LayoutResultKeyboard()
-        {
-            if (_kbdResult == null || _kbdResultHost == null)
-                return;
-
-            int hostW = _kbdResultHost.ClientSize.Width - Dpi.Px(16);
-            int hostH = _kbdResultHost.ClientSize.Height - Dpi.Px(8);
-            if (hostW < 120 || hostH < 50)
-                return;
-
-            double ratio = KeyboardLayout.TotalUnitsY / KeyboardLayout.TotalUnitsX;
-            int w = hostW;
-            int h = (int)Math.Round(w * ratio);
-            if (h > hostH)
-            {
-                h = hostH;
-                w = (int)Math.Round(h / ratio);
-            }
 
             _kbdResult.Size = new Size(w, h);
             _kbdResult.Location = new Point(
@@ -211,7 +195,6 @@ namespace WinKbdCheck
 
             FillOverview(captured, total, dur);
             FillKeyDetail(null);
-            LayoutResultKeyboard();
         }
 
         private void OnResultKeyClicked(object sender, KeyboardPanel.KeyState st)
@@ -343,6 +326,9 @@ namespace WinKbdCheck
             }
             finally
             {
+                // 内容填完后重新按内容撑开（-2 = 自动适应）
+                _lvOverview.Columns[1].Width = Dpi.Px(120);
+                _lvOverview.Columns[1].Width = -2;
                 _lvOverview.EndUpdate();
             }
         }

@@ -38,13 +38,14 @@ jobs:
           #       其它机器仍显示"未知发布者"。这是免费的代价。
           $cert = New-SelfSignedCertificate `
             -Type CodeSigningCert `
-            -Subject "CN=UNSA-studio (self-signed), O=UNSA-studio, C=CN" `
+            -Subject "CN=UNSA-studio, O=UNSA-studio, E=UNSA-studio@outlook.com, C=CN" `
             -CertStoreLocation Cert:\CurrentUser\My `
             -NotAfter (Get-Date).AddYears(3) `
             -KeyUsage DigitalSignature `
             -KeyAlgorithm RSA `
             -KeyLength 3072
           Write-Host "self-signed cert thumbprint: $($cert.Thumbprint)"
+          Write-Host "subject: $($cert.Subject)"
 
           Set-AuthenticodeSignature -FilePath build\WindowsKeyboardIntegrityCheck.exe `
             -Certificate $cert -HashAlgorithm SHA256 |

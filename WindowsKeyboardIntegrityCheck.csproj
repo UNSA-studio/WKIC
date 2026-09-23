@@ -31,5 +31,10 @@
     <Compile Include="src\*.cs" />
   </ItemGroup>
 
+  <!-- 把图标也嵌成托管资源：Form.Icon 从这里取，保证标题栏与 exe 图标一致 -->
+  <ItemGroup>
+    <EmbeddedResource Include="assets\app.ico" />
+  </ItemGroup>
+
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

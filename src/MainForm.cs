@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -104,6 +105,11 @@ namespace WinKbdCheck
 
         public MainForm()
         {
+            // 标题栏 / 任务栏 / Alt+Tab 都用与 exe 完全相同的那枚图标
+            Icon appIcon = LoadAppIcon();
+            if (appIcon != null)
+                Icon = appIcon;
+
             BuildUi();
 
             _hook = new KeyboardHook();
@@ -166,6 +172,42 @@ namespace WinKbdCheck
         /* ====================================================================
          *  UI 构建
          * ==================================================================== */
+
+        /// <summary>
+        /// 从嵌入资源里取出应用图标。
+        /// 不设置 Form.Icon 时，WinForms 会用系统默认图标，于是出现
+        /// "exe 图标是键盘、窗口标题栏却是别的"这种不一致。
+        /// 这里直接读 exe 里嵌入的那枚 ico（32×32 帧最清晰）。
+        /// </summary>
+        private static Icon LoadAppIcon()
+        {
+            try
+            {
+                Assembly asm = Assembly.GetExecutingAssembly();
+                string[] names = asm.GetManifestResourceNames();
+
+                for (int i = 0; i < names.Length; i++)
+                {
+                    if (!names[i].EndsWith("app.ico", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    using (Stream s = asm.GetManifestResourceStream(names[i]))
+                    {
+                        if (s == null)
+                            continue;
+                        using (Icon src = new Icon(s))
+                        {
+                            return new Icon(src, new Size(32, 32));
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 取不到就退回系统默认图标
+            }
+            return null;
+        }
 
         private void BuildUi()
         {
@@ -290,7 +332,6 @@ namespace WinKbdCheck
             base.OnResize(e);
             LayoutShell();
             LayoutTestPage();
-            LayoutResultKeyboard();
         }
 
         private void HeaderPaint(object sender, PaintEventArgs e)
@@ -320,14 +361,20 @@ namespace WinKbdCheck
             GroupBox box = new GroupBox();
             box.Text = "欢迎使用 Windows 键盘完整性检测";
             box.Location = new Point(24, 20);
-            box.Size = new Size(1120, 300);
+            box.Size = new Size(1120, 380);
             box.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-            Label desc = new Label();
-            desc.AutoSize = false;
+            TextBox desc = new TextBox();
+            desc.Multiline = true;
+            desc.ReadOnly = true;
+            desc.WordWrap = true;
+            desc.ScrollBars = ScrollBars.Vertical;
+            desc.BorderStyle = BorderStyle.None;
+            desc.BackColor = SystemColors.Control;
+            desc.Font = Dpi.MakeFont(9f);
             desc.Location = new Point(18, 26);
             desc.Size = new Size(1080, 250);
-            desc.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            desc.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             desc.Text =
                 "本程序用于逐键检测你的键盘：它会要求你按下键盘上的每一个按键，\r\n" +
                 "并记录每个按键是否被系统成功接收到硬件反馈。\r\n" +
@@ -356,13 +403,13 @@ namespace WinKbdCheck
             _chkAgree = new CheckBox();
             _chkAgree.Text = "我已知悉并同意：检测期间键盘输入将被本程序接管。";
             _chkAgree.AutoSize = true;
-            _chkAgree.Location = new Point(42, 336);
+            _chkAgree.Location = new Point(42, 416);
             _chkAgree.CheckedChanged += delegate { UpdateNav(); };
 
             Label tip = new Label();
             tip.AutoSize = true;
             tip.ForeColor = Color.FromArgb(160, 30, 30);
-            tip.Location = new Point(42, 366);
+            tip.Location = new Point(42, 448);
             tip.Text = "提示：建议以管理员身份运行，以便在高权限窗口（如任务管理器）处于前台时仍能完整接管键盘。";
 
             _pageWelcome.Controls.Add(box);
@@ -498,10 +545,10 @@ namespace WinKbdCheck
             _kbdHost = new Panel();
             _kbdHost.Height = 300;
             _kbdHost.BackColor = SystemColors.Control;
-            _kbdHost.Resize += delegate { LayoutKeyboard(); };
 
             _keyboard = new KeyboardPanel();
             _keyboard.KeyCaptured += OnKeyCaptured;
+            _keyboard.Dock = DockStyle.Fill;
             _kbdHost.Controls.Add(_keyboard);
 
             /* 底部信息区 */
@@ -630,24 +677,6 @@ namespace WinKbdCheck
             }
         }
 
-        private void LayoutKeyboard()
-        {
-            if (_keyboard == null || _kbdHost == null)
-                return;
-
-            int hostW = _kbdHost.ClientSize.Width - Dpi.Px(24);
-            int hostH = _kbdHost.ClientSize.Height - Dpi.Px(12);
-            if (hostW < 200 || hostH < 60)
-                return;
-
-            double ratio = KeyboardLayout.TotalUnitsY / KeyboardLayout.TotalUnitsX; // 6.5 / 23
-            int w = hostW;
-            int h = (int)Math.Round(w * ratio);
-            if (h > hostH)
-            {
-                h = hostH;
-                w = (int)Math.Round(h / ratio);
-            }
 
             _keyboard.Size = new Size(w, h);
             _keyboard.Location = new Point(
@@ -903,7 +932,6 @@ namespace WinKbdCheck
             }
             _guideTimer.Start();
 
-            LayoutKeyboard();
             AdvanceGuide();
 
             Log("检测", "=== 引导式逐键检测开始（" + DateTime.Now.ToString("HH:mm:ss.fff") + "）===");
@@ -1253,8 +1281,6 @@ namespace WinKbdCheck
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            LayoutKeyboard();
-            LayoutResultKeyboard();
 
             // 触摸屏：给所有列表 / 文本框挂上拖动滚动
             TouchScroll.Enable(this);

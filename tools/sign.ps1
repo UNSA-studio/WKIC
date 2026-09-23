@@ -19,7 +19,7 @@
 
 param(
     [string]$Exe = "$PSScriptRoot\..\build\WindowsKeyboardIntegrityCheck.exe",
-    [string]$Subject = "CN=UNSA-studio Code Signing, O=UNSA-studio, C=CN",
+    [string]$Subject = "CN=UNSA-studio, O=UNSA-studio, E=UNSA-studio@outlook.com, C=CN",
     [switch]$Trust
 )
 

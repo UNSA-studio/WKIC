@@ -304,24 +304,39 @@ namespace WinKbdCheck
 
         /* ---------------- 坐标换算 ---------------- */
 
-        private double CellWidth
+        /// <summary>
+        /// 键位单位对应的像素边长：取宽高两个方向能容纳的最小值，
+        /// 这样键盘图无论容器多扁多宽都**不会变形**，并且整体居中。
+        /// 布局由控件自己负责，外部只要 Dock=Fill 即可，不需要手工算尺寸。
+        /// </summary>
+        private double CellSize
         {
-            get { return (Width - 2.0 * PadMargin) / KeyboardLayout.TotalUnitsX; }
+            get
+            {
+                double cw = (Width - 2.0 * PadMargin) / KeyboardLayout.TotalUnitsX;
+                double ch = (Height - 2.0 * PadMargin) / KeyboardLayout.TotalUnitsY;
+                double cs = Math.Min(cw, ch);
+                return (cs > 1.0) ? cs : 1.0;
+            }
         }
 
-        private double CellHeight
+        private double OffsetX
         {
-            get { return (Height - 2.0 * PadMargin) / KeyboardLayout.TotalUnitsY; }
+            get { return (Width - KeyboardLayout.TotalUnitsX * CellSize) / 2.0; }
+        }
+
+        private double OffsetY
+        {
+            get { return (Height - KeyboardLayout.TotalUnitsY * CellSize) / 2.0; }
         }
 
         private Rectangle RectOf(KeyDef k)
         {
-            double cw = CellWidth;
-            double ch = CellHeight;
-            int x = (int)Math.Round(PadMargin + k.X * cw) + Gap / 2;
-            int y = (int)Math.Round(PadMargin + k.Y * ch) + Gap / 2;
-            int w = (int)Math.Round(k.W * cw) - Gap;
-            int h = (int)Math.Round(k.H * ch) - Gap;
+            double cs = CellSize;
+            int x = (int)Math.Round(OffsetX + k.X * cs) + Gap / 2;
+            int y = (int)Math.Round(OffsetY + k.Y * cs) + Gap / 2;
+            int w = (int)Math.Round(k.W * cs) - Gap;
+            int h = (int)Math.Round(k.H * cs) - Gap;
             int minSide = Dpi.Px(4);
             if (w < minSide) w = minSide;
             if (h < minSide) h = minSide;

@@ -41,6 +41,7 @@ for %%F in ("%SRC%\*.cs") do set SOURCES=!SOURCES! "%%F"
 "%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 ^
     /out:"%OUT%\%EXENAME%" ^
     /win32icon:"%ROOT%assets\app.ico" ^
+    /resource:"%ROOT%assets\app.ico",WinKbdCheck.assets.app.ico ^
     /win32manifest:"%ROOT%app.manifest" ^
     /reference:System.dll,System.Core.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Management.dll ^
     !SOURCES!

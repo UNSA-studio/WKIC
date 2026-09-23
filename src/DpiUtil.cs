@@ -144,7 +144,12 @@ namespace WinKbdCheck
                 if (lv != null)
                 {
                     for (int j = 0; j < lv.Columns.Count; j++)
-                        lv.Columns[j].Width = Px(lv.Columns[j].Width);
+                    {
+                        // 负值是 ListView 的特殊常量（-1 = 按表头，-2 = 按内容自动撑开），
+                        // 缩放会把语义改掉，必须原样保留。
+                        if (lv.Columns[j].Width > 0)
+                            lv.Columns[j].Width = Px(lv.Columns[j].Width);
+                    }
                 }
 
                 // TableLayoutPanel 的绝对尺寸行/列

@@ -6,17 +6,20 @@ using System.Windows.Forms;
 namespace WinKbdCheck
 {
     /// <summary>
-    /// 让传统 WinForms 控件在触摸屏上能拖动滚动。
+    /// 让传统 WinForms 控件在触摸屏上能拖动滚动（横向 + 纵向）。
     ///
     /// 背景：ListView / ListBox / TextBox 这些老控件只认鼠标滚轮，
-    /// 手指拖动默认不会滚动内容 —— 在平板上会出现"列表根本滚不动"的问题。
+    /// 手指拖动默认完全不会滚动 —— 在平板上就是"列表/协议根本拉不动"。
     ///
     /// 这里做两件事：
     ///  1) 对 ListView 调用 SetWindowTheme(hwnd, "Explorer", NULL)，
-    ///     让它走资源管理器那套主题，从而获得系统级的触摸惯性与拖动滚动；
-    ///  2) 子类化窗口过程，识别「由触摸产生的鼠标消息」
-    ///     （GetMessageExtraInfo 里的 FROMTOUCH 标记），
-    ///     把这些拖动自己换算成滚动；真实鼠标拖动保持原生行为（框选不动）。
+    ///     让它走资源管理器那套主题，拿到系统级的触摸惯性；
+    ///  2) 子类化窗口过程，用 GetMessageExtraInfo() 里的 FROMTOUCH 标记
+    ///     识别"这条鼠标消息其实是手指划出来的"，把拖动自己换算成滚动。
+    ///     真实鼠标拖动保持原生行为（例如 ListView 的框选）。
+    ///
+    /// 横向也处理了：左侧数据栏里 CPU 型号、时间戳这类长文本会自动撑开列宽，
+    /// 超出面板宽度的部分靠横向拖动查看。
     /// </summary>
     internal static class TouchScroll
     {
@@ -34,6 +37,7 @@ namespace WinKbdCheck
         private const long TOUCH_SIG = 0xFF515700L;
 
         private const int EM_LINESCROLL = 0x00B6;
+        private const int LVM_SCROLL = 0x1014;
 
         /// <summary>递归给整棵控件树里所有可滚动控件挂上触摸滚动支持。</summary>
         public static void Enable(Control root)
@@ -147,8 +151,9 @@ namespace WinKbdCheck
 
                     if (!_moving)
                     {
-                        // 需要超过阈值才算拖动，否则单击仍然正常选中
-                        if (Math.Abs(now.Y - _startCursor.Y) < Dpi.Px(8))
+                        // 需要超过死区才算拖动，否则轻点仍然正常选中
+                        int moved = Math.Abs(now.X - _startCursor.X) + Math.Abs(now.Y - _startCursor.Y);
+                        if (moved < Dpi.Px(8))
                         {
                             base.WndProc(ref m);
                             return;
@@ -158,15 +163,13 @@ namespace WinKbdCheck
                         return;
                     }
 
-                    int itemHeight = GetItemHeight();
-                    if (itemHeight > 0)
+                    int dx = now.X - _lastCursor.X;
+                    int dy = now.Y - _lastCursor.Y;
+                    if (dx != 0 || dy != 0)
                     {
-                        int lines = (now.Y - _lastCursor.Y) / itemHeight;
-                        if (lines != 0)
-                        {
-                            _lastCursor = now;
-                            ScrollBy(-lines);
-                        }
+                        _lastCursor = now;
+                        // 手指往哪边划，内容就往反方向走
+                        ScrollBy(-dx, -dy);
                     }
 
                     return;   // 吞掉，避免控件去画选择框
@@ -185,14 +188,6 @@ namespace WinKbdCheck
 
             private int GetItemHeight()
             {
-                ListView lv = _target as ListView;
-                if (lv != null)
-                {
-                    if (lv.Items.Count > 0 && lv.Items[0].Bounds.Height > 0)
-                        return lv.Items[0].Bounds.Height;
-                    return Dpi.Px(20);
-                }
-
                 ListBox lb = _target as ListBox;
                 if (lb != null)
                     return Math.Max(1, lb.ItemHeight);
@@ -204,32 +199,36 @@ namespace WinKbdCheck
                 return Math.Max(1, _target.Font.Height);
             }
 
-            /// <summary>lines &gt; 0 表示内容向上滚（看到更靠后的内容）。</summary>
-            private void ScrollBy(int lines)
+            /// <summary>
+            /// dx / dy 为「内容移动量」：
+            /// 正值表示内容向左 / 向上移动（也就是看到右侧 / 下方的内容）。
+            /// </summary>
+            private void ScrollBy(int dx, int dy)
             {
+                /* ---- ListView：原生就支持按像素横竖滚动 ---- */
                 ListView lv = _target as ListView;
                 if (lv != null)
                 {
-                    if (lv.Items.Count == 0 || lv.TopItem == null)
+                    if (dx == 0 && dy == 0)
                         return;
-                    int idx = lv.TopItem.Index + lines;
-                    if (idx < 0) idx = 0;
-                    if (idx > lv.Items.Count - 1) idx = lv.Items.Count - 1;
-                    try
-                    {
-                        lv.TopItem = lv.Items[idx];
-                    }
-                    catch
-                    {
-                    }
+                    if (!lv.IsHandleCreated)
+                        return;
+                    SendMessage(lv.Handle, LVM_SCROLL, (IntPtr)dx, (IntPtr)dy);
                     return;
                 }
 
+                int itemHeight = GetItemHeight();
+
+                /* ---- ListBox：按行滚，只支持纵向 ---- */
                 ListBox lb = _target as ListBox;
                 if (lb != null)
                 {
-                    if (lb.Items.Count == 0)
+                    if (dy == 0 || lb.Items.Count == 0)
                         return;
+                    int lines = dy / itemHeight;
+                    if (lines == 0)
+                        lines = (dy > 0) ? 1 : -1;
+
                     int idx = lb.TopIndex + lines;
                     if (idx < 0) idx = 0;
                     if (idx > lb.Items.Count - 1) idx = lb.Items.Count - 1;
@@ -237,11 +236,14 @@ namespace WinKbdCheck
                     return;
                 }
 
-                // TextBox / RichTextBox：直接发 EM_LINESCROLL
+                /* ---- TextBox / RichTextBox：按行滚，只支持纵向 ---- */
                 if (_target is TextBox || _target is RichTextBox)
                 {
-                    if (!_target.IsHandleCreated)
+                    if (dy == 0 || !_target.IsHandleCreated)
                         return;
+                    int lines = dy / itemHeight;
+                    if (lines == 0)
+                        lines = (dy > 0) ? 1 : -1;
                     SendMessage(_target.Handle, EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
                 }
             }
