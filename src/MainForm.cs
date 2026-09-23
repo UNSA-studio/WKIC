@@ -678,13 +678,7 @@ namespace WinKbdCheck
         }
 
 
-            _keyboard.Size = new Size(w, h);
-            _keyboard.Location = new Point(
-                (_kbdHost.ClientSize.Width - w) / 2,
-                (_kbdHost.ClientSize.Height - h) / 2);
-        }
-
-        private static ListView MakeListView(string[] headers, int[] widths)
+            private static ListView MakeListView(string[] headers, int[] widths)
         {
             ListView lv = new ListView();
             lv.Dock = DockStyle.Fill;

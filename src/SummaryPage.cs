@@ -145,13 +145,7 @@ namespace WinKbdCheck
         }
 
 
-            _kbdResult.Size = new Size(w, h);
-            _kbdResult.Location = new Point(
-                (_kbdResultHost.ClientSize.Width - w) / 2,
-                (_kbdResultHost.ClientSize.Height - h) / 2);
-        }
-
-        /* ====================================================================
+            /* ====================================================================
          *  数据填充
          * ==================================================================== */
 
