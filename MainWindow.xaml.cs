@@ -72,7 +72,7 @@ public sealed partial class MainWindow : Window
     private void Navigate(NavigationViewItem item)
     {
         item.IsEnabled = true;
-        if (Nav.SelectedItem == item) ShowPage(item.Tag.ToString()); else Nav.SelectedItem = item;
+        if (ReferenceEquals(Nav.SelectedItem, item)) ShowPage(item.Tag.ToString()); else Nav.SelectedItem = item;
     }
 
     private UIElement WelcomePage()
@@ -297,7 +297,7 @@ public sealed partial class MainWindow : Window
 
     private UIElement SettingsPage()
     {
-        var theme = new ComboBox { Header = "界面主题", SelectedIndex = (int)Root.RequestedTheme, MinWidth = 220 };
+        var theme = new ComboBox { Header = "界面主题", MinWidth = 220 };
         theme.Items.Add("跟随 Windows"); theme.Items.Add("浅色"); theme.Items.Add("深色");
         theme.SelectedIndex = (int)Root.RequestedTheme;
         theme.SelectionChanged += (_, _) => { if (theme.SelectedIndex >= 0) Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; };
@@ -335,12 +335,19 @@ public sealed partial class MainWindow : Window
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Enabled,
         HorizontalScrollMode = ScrollMode.Disabled, ZoomMode = ZoomMode.Disabled, Padding = new Thickness(0, 0, 8, 8)
     };
-    private static Border Card(UIElement content) => new()
+    private static Border Card(UIElement content)
     {
-        Child = content, Padding = new Thickness(18), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
-        Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
-        BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"]
-    };
+        var card = new Border { Child = content, Padding = new Thickness(18), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
+        void ApplyTheme()
+        {
+            card.Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"];
+            card.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        }
+        card.Loaded += (_, _) => ApplyTheme();
+        card.ActualThemeChanged += (_, _) => ApplyTheme();
+        ApplyTheme();
+        return card;
+    }
     private static Button Button(string title, Action click, bool accent = false)
     {
         var button = new Button { Content = title, MinHeight = 40, Padding = new Thickness(18, 8, 18, 8) };
@@ -348,7 +355,7 @@ public sealed partial class MainWindow : Window
         button.Click += (_, _) => click();
         return button;
     }
-    private static Grid TwoRows(UIElement body, UIElement footer)
+    private static Grid TwoRows(FrameworkElement body, FrameworkElement footer)
     {
         var grid = new Grid { RowSpacing = 16 };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });

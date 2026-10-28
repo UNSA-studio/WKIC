@@ -1,223 +1,118 @@
 # Windows Keyboard Integrity Check
 
-**Windows 键盘完整性检测** — 逐键按压检测你的键盘，记录每个按键是否被系统成功接收到硬件反馈，并采集键盘设备、驱动与年代信息。
-界面使用 WinForms + Windows 原生视觉样式渲染（`ButtonRenderer` / `DrawThemeBackground`），控件外观与系统原生控件一致，不自绘仿制品。
+**Windows 键盘完整性检测 · WinUI 3**  
+开发者：UNSA-studio · 联系邮箱：UNSA-studio@outlook.com  
+应用版本保持 **1.0.0**，此次仅迁移界面与构建体系，没有升级版本号。
 
----
+## 下载与运行
 
-## 直接下载
+WinUI 3 构建提供两种完整分发包：
 
-已编译好的 exe（每次推送自动构建）：
+- **安装 EXE**：安装程序会安装应用以及它所需的 .NET、Windows App SDK 运行库；不需要 Visual Studio 或手动安装开发环境。
+- **免安装 ZIP**：完整解压后运行其中的 `WindowsKeyboardIntegrityCheck.exe`。**不能只复制一个 EXE**，原生 WinUI 3 运行库需要跟随应用分发。
 
-**https://raw.githubusercontent.com/UNSA-studio/WKIC/main/dist/WindowsKeyboardIntegrityCheck.exe**
+下载入口：GitHub 仓库 `UNSA-studio/WKIC` 的 Releases → `winui3`。成功构建后，安装 EXE 也会更新到 `dist/WindowsKeyboardIntegrityCheck.exe`，继续支持原来的 raw 下载地址；注意该地址现在是**安装程序**，不再是旧 WinForms 的小型单文件程序。
 
-> 右键「另存为」下载。建议保存后右键 → **以管理员身份运行**。
+系统要求：**Windows 10 1809（17763）及以上 / Windows 11，x64**。不再支持 Windows 7 / 8。项目预留 ARM64 配置，当前 CI 分发与测试的是 x64。
 
----
+运行应用需**右键 → 以管理员身份运行**。普通权限启动会显示：
 
-## 功能
+> Windows键盘完整性检测需要依靠管理员运行,请使用管理员权限打开
 
+## 界面与功能
 
-| 需求 | 实现方式 |
-| --- | --- |
-| 要求用户按下每一个按键 | 引导式：键盘图上闪烁提示下一个该按的键，按对即完全点亮并自动前进 |
-| 风格与 Windows 原生组件一模一样 | `Application.EnableVisualStyles()` + `VisualStyleRenderer` / `ButtonRenderer`，字体取 `SystemFonts.MessageBoxFont` |
-| 有详细的过程 | 信息采集实时日志、逐键实时反馈、完整过程时间线，全部可导出 |
-| 按下的键变成系统主题色 | 读取 `HKCU\...\DWM\AccentColor`（回退 `DwmGetColorizationColor`），捕获成功的键立即用强调色填充 |
-| 接管全部键盘操作 | `SetWindowsHookEx(WH_KEYBOARD_LL)`，回调返回 1 吞掉消息；按 Win 键不会弹出开始菜单 |
-| 检测设备名 / 年份 / 驱动 / 时代 | RawInput + `Win32_PnPEntity` + `Win32_PnPSignedDriver` + 注册表 + 驱动文件版本信息 |
-| 最后的总结页面 | 5 个选项卡：检测结果 / 键盘设备 / 系统键盘参数 / 驱动文件 / 完整过程 |
+这不是 WinForms 主题包或 WebView 仿制：主窗口和键盘图均使用 `Microsoft.UI.Xaml`，标准控件来自 Windows App SDK。
 
----
+- 四步向导：使用说明 → 设备信息 → 按键检测 → 结果。
+- 原生 `NavigationView`、`Button`、`InfoBar`、`Expander`、`ScrollViewer`，支持系统主题、浅色、深色和高对比度。
+- 全部说明、数据值自动换行，不用固定列宽截断长设备名、账户或驱动信息。
+- 触屏滚动直接交给 WinUI `ScrollViewer`，移除旧版鼠标消息模拟滚动补丁。
+- 使用设备无关单位，不再手工倍乘字体和位置；窄窗口中结果页上下排列，键盘可横向滚动。
+- EXE、窗口标题栏和任务栏均使用 `assets/app.ico`，不冒充微软出品。
 
-## 编译
+### 检测流程
 
-### 方式一：一键脚本（推荐，无需安装任何东西）
+1. 当前目标闪烁高亮，等待用户按下并松开。
+2. 收到按下事件即显示主题色；收到抬起后确认完整响应，并前进。
+3. **3 秒内未按下**自动跳过。按住某键不等于没有按下，不会因为按住超过 3 秒而误判超时。
+4. 非当前目标同样可以提前检测；后续自动跳过已经完整响应的键。
+5. 超时键可在会话结束前补测。
+6. 双击同一颗回车键结束；必须是两次完整的按下／松开，长按自动重复不算双击。两次间隔 450 毫秒。
+7. 回车键不能用时，点击左下角**完成检测**。
+8. `Ctrl+Alt+Shift+Q` 紧急停止；离开测试页、窗口失去焦点、关闭窗口或界面超时也会解除接管。
 
-双击 `build.bat`。
+设置里可选 104 键 ANSI 或 87 键 TKL（无数字小键盘）布局，也可关闭键盘接管。布局变化用于下一次测试，主题开关立即生效。
 
-脚本会自动定位 `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`（Windows 8/10/11 自带），
-直接编译出 `build\WindowsKeyboardIntegrityCheck.exe`。
+### 键盘接管与边界
 
-### 方式二：MSBuild / Visual Studio
+- 全局 `WH_KEYBOARD_LL` 钩子运行在**独立消息循环线程**，回调不访问 XAML、WMI 或磁盘；UI 从队列读取事件。
+- 接管仅在测试期间启用。通常的 Win 键、Alt+Tab 等输入会被吞掉；鼠标和触屏不被锁定。
+- 紧急停止和看门狗与 UI 线程独立，UI 超时后解除接管。
+- **Ctrl+Alt+Del 等安全桌面操作无法由此钩子屏蔽**。Fn、电源、部分厂商功能键可能不向 Windows 键盘输入栈发送普通事件。
+- 注入标志为真的软件模拟事件不会被计作物理键盘通过。
+- 多台键盘连接时，测试记录是**合并输入**。枚举设备并不等于已经把事件绑定到某一台键盘。
 
-```
-msbuild WindowsKeyboardIntegrityCheck.csproj /p:Configuration=Release
-```
+### 结果页
 
-### 方式三：GitHub Actions
+- 左侧：本次数据、账户、用户组、机器硬件、键盘设备、驱动信息和采集过程；支持换行与触屏滚动。
+- 右侧：完整结果键盘，与检测阶段共享**同一组状态记录**。
+- **绿**：收到完整按下／抬起；**红**：超时未响应／疑似故障；**琥珀**：缺少抬起反馈；**灰**：未检测。
+- 点击任意键才显示扫描码、实际 VK、扩展位、次数、重复次数、时间、累计按住时长与该键事件记录。点击键盘图不会被算作物理按键。
+- 未按、无此键、Win Lock、固件、驱动或布局等均可能导致未响应，因此不能单凭超时断定硬件损坏。
+- 导出 TXT 包含完整设备信息、逐键记录和时间线，不裁剪长文本。输出位置由保存对话框选择。
 
-推送到 `main` 分支即自动构建，产物在 Actions 的 Artifacts 中。
+### 硬件信息
 
----
+使用 Raw Input / WMI / 注册表查询设备名称、VID/PID、PnP 状态、驱动版本、驱动日期、提供商、INF、签名者以及系统账户和硬件概况。WMI 按设备类别一次查询，使用完整设备实例 ID 匹配，不把同型号的不同键盘误认成同一实例。
 
-## 使用
+硬件出厂年份未公开时明确显示“未知”，**不把驱动日期或 BIOS 日期当成键盘生产年份**。
 
-1. 运行 `WindowsKeyboardIntegrityCheck.exe`。
-   建议**右键 → 以管理员身份运行**：普通权限的钩子在前台窗口以更高权限运行时收不到输入。
-2. 第 1 步勾选风险告知 → 下一步。
-3. 第 2 步自动采集设备信息，过程会实时打印在日志里。
-4. 第 3 步是**引导式逐键检测**：
-   - 键盘图上会**闪烁**提示下一个要按的键，上方大字显示键名与剩余时间；
-   - 按对 → 该键**完全点亮**并变成当前系统主题色，自动进入下一个；
-   - **3 秒**内没按下 → 自动跳到下一个（记作「超时跳过」，显示为灰色虚线框）；
-   - 全部走完会自动结束。
-5. 第 4 步查看总结，点「导出报告」保存为 txt。
+## 签名
 
-### 结束与逃生
+CI 保留免费自签名，Subject 包含：
 
-* **双击回车键** —— 主要的主动结束方式；
-* **鼠标点击左下角「完成检测」按钮** —— 回车键坏掉时的兜底出口；
-* 组合键 **Ctrl + Alt + Shift + Q** —— 紧急停止；
-* 取消勾选「接管键盘输入」 —— 按键立刻恢复正常传递。
-
-> **Ctrl + Alt + Del 无法被拦截。** 安全注意序列由内核 `winlogon` 直接处理，
-> 任何用户态程序（包括本程序）都不可能截获它。
-
----
-
-## 技术要点
-
-### 键盘接管
-
-```csharp
-_hookId = SetWindowsHookEx(WH_KEYBOARD_LL, callback, GetModuleHandle(null), 0);
+```text
+CN=UNSA-studio, O=UNSA-studio, E=UNSA-studio@outlook.com, C=CN
 ```
 
-低级键盘钩子由系统在安装线程的消息泵中回调。回调返回非 0 即吞掉该按键消息，
-此时 `explorer.exe` 收不到 Win 键，开始菜单不会弹出。
+应用和安装程序签名，免安装包附带对应公钥 `.cer`；不会自动更改用户的受信任根证书存储。
 
-回调内只做常数时间的字典查找与 `Invalidate`，重活全部异步丢回消息泵，避免拖慢输入链。
+**自签名不等于 CA 信任或 SmartScreen 声誉，不保证消除“未知发布者”提示。** 任何人都可以生成写有相同名称的自签名证书，名称和邮箱本身不能证明发布者身份。下载来源与 SHA-256 校验仍需核实。
 
-### 左右修饰键区分
+若为 CI 配置 `SIGNING_PFX`（base64）和 `SIGNING_PASSWORD` Secrets，可复用自己的稳定证书；不配置时每次构建生成临时自签名证书，旧证书的本机信任不会自动信任下一次生成的新证书。私钥不得提交仓库。
 
-Win32 中左 / 右 Shift 共享 `VK_SHIFT`、左 / 右 Ctrl 共享 `VK_CONTROL`、
-主键盘回车与小键盘回车共享 `VK_RETURN`。本程序按以下优先级匹配：
+## 构建与验证
 
-1. 扫描码精确匹配（左 Shift `0x2A` / 右 Shift `0x36`）
-2. 扩展位匹配（`LLKHF_EXTENDED`，区分左右 Ctrl / Alt 与两种回车）
-3. 虚拟键码匹配
-4. 兜底：仅虚拟键码
+Windows 构建环境：.NET 8 SDK、Visual Studio 2022 MSBuild / Windows SDK；CI 自动准备。项目依赖固定到 Windows App SDK `1.8.260921001`。
 
-### 主题色读取
-
-```
-HKCU\Software\Microsoft\Windows\DWM\AccentColor   → 0xAABBGGRR
-                    ↓ 取不到
-DwmGetColorizationColor()                          → 0xAARRGGBB
-                    ↓ 取不到
-#0078D7（Windows 10 默认蓝）
+```powershell
+dotnet run --project tests/CoreTests.csproj -c Release
+msbuild WindowsKeyboardIntegrityCheck.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:PublishDir=artifacts\publish\
 ```
 
-### 年代 / 时代推断
+本地也可以运行 `build.bat`。发布目录必须整体保留。安装程序使用 Inno Setup 构建（`packaging/WKIC.iss`）。
 
-* **接口时代**：由 RawInput 设备路径推断（`ACPI\PNP0303` → PS/2；
-  `BTHENUM` → 蓝牙 HID；`VID_xxxx&PID_xxxx` → USB HID）。
-* **驱动年代**：由 `Win32_PnPSignedDriver.DriverDate` 映射到对应 Windows 世代
-  （DOS/9x 过渡期 → XP → Vista → 7 → 8 → 10/11）。
+CI 顺序：
 
----
+1. 核心回归：左右修饰键、主／小键盘回车、NumLock 关闭、Win 键、3 秒跳过、补测、重复事件、注入过滤、重置、完整 104 键等。
+2. 编译真正的 WinUI XAML 并发布自包含目录。
+3. **实际启动 WinUI 进程**，验证键盘有尺寸且全部键位已建立、点击记录与会话数据一致、原生欢迎页可滚动，渲染浅色／深色／窄窗口 PNG。该测试明确使用模拟数据，**不是实际硬件认证**，不安装键盘钩子、不接管 CI 机器键盘。
+4. 签名应用，打包安装 EXE 与免安装 ZIP，发布并附 SHA-256。
+5. `WKIC-UI-verification` artifact 保存测试证据、PNG、构建日志。触屏真机手势和不同硬件组合仍需实机验收。
 
-## 目录结构
+## 目录
 
+```text
+App.xaml / App.xaml.cs        WinUI Application
+Program.cs                   权限检查与 WinUI 入口
+MainWindow.xaml / .cs        导航、四步界面、结果与设置
+Controls/KeyboardView.*      WinUI 按键图与点击记录
+Core/TestSession.cs          与 UI 无关的检测状态机
+Core/KeyboardCapture.cs      独立线程 Win32 钩子与安全释放
+Services/Inventory.cs        设备／驱动采集
+Services/Report.cs           完整报告及管理员可用的保存对话框
+src/                         复用的硬件 P/Invoke 和键位表
+tests/                       核心回归测试
+packaging/                   自包含安装程序脚本
+legacy/WinForms/             旧界面源码归档，不参与新项目编译
 ```
-WindowsKeyboardIntegrityCheck/
-├─ build.bat                          一键编译脚本
-├─ app.manifest                       Win32 清单（DPI、兼容性、执行级别）
-├─ WindowsKeyboardIntegrityCheck.csproj
-└─ src/
-   ├─ Program.cs                      入口，启用视觉样式
-   ├─ MainForm.cs                     四步向导主窗体
-   ├─ KeyboardPanel.cs                键盘自绘控件（原生按钮外观 + 主题色高亮）
-   ├─ KeyboardLayout.cs               104/105 键位表与匹配算法
-   ├─ KeyboardHook.cs                 WH_KEYBOARD_LL 全局钩子
-   ├─ DeviceInfo.cs                   RawInput / WMI / 注册表信息采集
-   ├─ ThemeUtil.cs                    系统主题色读取
-   ├─ ReportExporter.cs               报告生成
-   └─ NativeMethods.cs                全部 P/Invoke 声明
-```
-
----
-
-## 图标
-
-应用图标由 `tools/make_icon.py` **用代码绘制**（Microsoft Fluent 风格：圆角渐变底 + 白色键盘），
-不使用任何微软商标资产；输出 16/20/24/32/40/48/64/128/256 九个尺寸，
-每个尺寸独立渲染 + 4× 超采样抗锯齿，全部以 PNG 形式内嵌进 ICO。
-
-重新生成：
-
-```bat
-python tools\make_icon.py
-```
-
-预览：`assets/app_256.png`
-
----
-
-## 关于软件签名
-
-本程序**没有使用微软的代码签名**，原因不是偷懒：
-
-1. **技术上不可能。** Authenticode 签名需要证书对应的**私钥**。微软的代码签名私钥存放在微软的 HSM（硬件安全模块）中，外部人员无法获取。凡是号称"套用微软签名"的，要么是假签名，要么就是恶意软件。
-2. **伪造签名会触发反恶意软件判定。** Windows 验签时会检查证书链与吊销状态，伪造的链会立刻失败；而"带无效签名"正是 SmartScreen / Defender 判定恶意软件的典型特征 —— 结果是自己机器上反而被拦截甚至隔离。
-3. **法律风险。** 冒用他人电子签名属于违法行为。
-
-### 本仓库的现状：CI 已自动自签名
-
-每次 CI 构建成功后，会**自动生成一张自签名代码签名证书**并给 exe 签名（SHA-256）。
-这意味着：
-
-* exe 的「数字签名」选项卡里**能看到签名者**：`CN=UNSA-studio (self-signed)`；
-* 但因为不是受信任的 CA 签发，状态显示为 **`UnknownError` / 不受信任**，SmartScreen 仍会提示"未知发布者"；
-* 每次构建生成的是**新证书**，所以每次发布的 exe 签名指纹都不同 —— 这是"免费"的代价，正规证书做不到免费。
-
-想让本机不再弹提示，用仓库里的脚本：
-
-```bat
-powershell -ExecutionPolicy Bypass -File tools\sign.ps1 -Trust
-```
-
-### 其它签名方案
-
-| 方案 | 成本 | 效果 |
-| --- | --- | --- |
-| **自签名**（CI 已启用；本地脚本 `tools/sign.ps1`） | 免费 | 本机可信任；其它机器显示"未知发布者" |
-| **Azure Trusted Signing** | 约 $9.99/月，需身份验证 | **微软官方服务**，全网可信 ✓ 推荐 |
-| **SignPath.io** | 开源项目免费 | 全网可信 |
-| **Certum / Sectigo OV 代码签名** | 约 $100–200/年 | 全网可信，需实名 |
-
-若日后买了正规证书，把它转成 base64 放进仓库 Secrets（`SIGNING_PFX` / `SIGNING_PASSWORD`），
-再把 CI 里的自签名步骤换成 `Set-AuthenticodeSignature -Certificate $pfxCert` 即可，其余不用动。
-
----
-
-## 高 DPI
-
-程序**关闭了 WinForms 的 AutoScale**，改为全程序统一一套缩放置：
-
-* 尺寸：所有像素值都过 `Dpi.Px()`，基准是 96 DPI；
-* 字体：所有字体都由 `Dpi.MakeFont()` 生成（内部转成 `GraphicsUnit.Pixel` 再乘缩放系数）；
-* 缩放系数：启动时取 `Graphics.FromHwnd(IntPtr.Zero).DpiX / 96`，只算一次。
-
-之所以不用 `AutoScaleMode.Dpi`：它只缩放控件的布局属性、**不缩放 Font**，
-而本程序的 `LayoutShell()` / `LayoutTestPage()` 又会在 `OnResize` 里用硬编码像素写回尺寸，
-两者互相覆盖，最终高 DPI 下表现为"控件和字体一大一小对不上"。
-
-窗口尺寸另有 `ClampToScreen()`：1180×820 在 150% 缩放下会变成 1770×1230，
-1080p 屏放不下，因此会连带 `MinimumSize` 一起收窄到屏幕工作区以内。
-
----
-
-## 运行环境
-
-* Windows 7 SP1 / 8 / 8.1 / 10 / 11
-* .NET Framework 4.x（Windows 8 及以上系统内置）
-* 无需第三方运行库
-
-## 已知限制
-
-* `Ctrl + Alt + Del`（SAS）无法拦截，这是操作系统设计使然。
-* 前台窗口以更高完整性级别运行时（例如「以管理员身份运行」的程序位于前台），
-  未提权的钩子收不到键盘输入 —— 此时请以管理员身份运行本程序。
-* 检测基于「系统是否收到按键」，因此**鼠标 / 触摸板不受影响**，任何时候都能用鼠标操作界面。

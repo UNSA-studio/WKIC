@@ -17,6 +17,8 @@ public sealed partial class KeyboardView : UserControl
     private List<KeyRecord> _records;
     private int _selected;
     private bool _result;
+    private int _guide;
+    private bool _phase = true;
     internal event Action<KeyRecord> KeySelected;
     internal int RenderedKeyCount => _buttons.Count;
     internal double BoardWidth => Board.ActualWidth;
@@ -40,8 +42,10 @@ public sealed partial class KeyboardView : UserControl
         }
         SizeChanged += (_, _) => ArrangeKeys();
         Loaded += (_, _) => ArrangeKeys();
-        ActualThemeChanged += (_, _) => _visual.Clear();
-        _settings.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(() => _visual.Clear());
+        ActualThemeChanged += (_, _) => RefreshColors();
+        _settings.ColorValuesChanged += OnAccentChanged;
+        Unloaded += (_, _) => _settings.ColorValuesChanged -= OnAccentChanged;
+        Loaded += (_, _) => { _settings.ColorValuesChanged -= OnAccentChanged; _settings.ColorValuesChanged += OnAccentChanged; };
     }
 
     internal void SetRecords(List<KeyRecord> records, bool result)
@@ -80,8 +84,13 @@ public sealed partial class KeyboardView : UserControl
         }
     }
 
+    private void OnAccentChanged(UISettings sender, object args) => DispatcherQueue.TryEnqueue(RefreshColors);
+    private void RefreshColors() { _visual.Clear(); Render(_guide, _phase); }
+
     internal void Render(int guideId, bool phase)
     {
+        _guide = guideId;
+        _phase = phase;
         if (_records == null) return;
         bool highContrast = _accessibility.HighContrast;
         Color accent = _settings.GetColorValue(UIColorType.Accent);
@@ -121,7 +130,7 @@ public sealed partial class KeyboardView : UserControl
                 bool solid = _result || key.DownCount > 0 || guide && phase;
                 button.Background = new SolidColorBrush(solid ? fill : Color.FromArgb(35, accent.R, accent.G, accent.B));
                 double luminance = .2126 * fill.R + .7152 * fill.G + .0722 * fill.B;
-                button.Foreground = new SolidColorBrush(!solid ? accent : luminance > 170 ? Colors.Black : Colors.White);
+                button.Foreground = new SolidColorBrush(!solid ? accent : luminance > 170 ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White);
                 button.BorderBrush = new SolidColorBrush(key.Def.Id == _selected ? accent : fill);
             }
             AutomationProperties.SetHelpText(button, key.Status);
