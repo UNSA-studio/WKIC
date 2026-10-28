@@ -233,45 +233,34 @@ namespace WinKbdCheck
         /// </summary>
         public static KeyDef Match(int vk, uint scanCode, bool extended)
         {
-            List<KeyDef> keys = Keys;
-
-            // 第一轮：扫描码或扩展位有明确要求的键
-            for (int i = 0; i < keys.Count; i++)
+            // Low-level hooks normally report distinct L/R modifier VK values, not VK_CONTROL.
+            if (vk == 0xA0 || vk == 0xA1)
             {
-                KeyDef k = keys[i];
-                if (k.ScanCode != 0)
+                uint shiftScan = vk == 0xA0 ? 0x2Au : 0x36u;
+                return Keys.Find(k => k.Vk == 0x10 && k.ScanCode == shiftScan);
+            }
+            if (vk == 0xA2 || vk == 0xA3) { extended = vk == 0xA3; vk = 0x11; }
+            if (vk == 0xA4 || vk == 0xA5) { extended = vk == 0xA5; vk = 0x12; }
+
+            // NumLock off changes VK_NUMPADx into navigation VKs. Physical scan + E0 distinguish them.
+            if (!extended && vk != 0x13)
+            {
+                int num = (int)scanCode switch
                 {
-                    if ((int)scanCode == k.ScanCode)
-                        return k;
-                    continue;
-                }
-                if (k.ExtMode != 0)
-                {
-                    if (k.Vk != vk)
-                        continue;
-                    if (k.ExtMode == 1 && !extended)
-                        continue;
-                    if (k.ExtMode == 2 && extended)
-                        continue;
-                    return k;
-                }
+                    0x52 => 0x60, 0x4F => 0x61, 0x50 => 0x62, 0x51 => 0x63,
+                    0x4B => 0x64, 0x4C => 0x65, 0x4D => 0x66, 0x47 => 0x67,
+                    0x48 => 0x68, 0x49 => 0x69, 0x53 => 0x6E, _ => 0
+                };
+                if (num != 0) return Keys.Find(k => k.Vk == num);
             }
-
-            // 第二轮：普通键按虚拟键码匹配
-            for (int i = 0; i < keys.Count; i++)
+            if (vk == 0x0D) return Keys.Find(k => k.Vk == vk && (extended ? k.ExtMode == 1 : k.ExtMode != 1));
+            foreach (KeyDef k in Keys)
             {
-                KeyDef k = keys[i];
-                if (k.ScanCode == 0 && k.ExtMode == 0 && k.Vk == vk)
-                    return k;
+                if (k.Vk != vk) continue;
+                if (k.ScanCode != 0 && k.ScanCode != scanCode) continue;
+                if (k.ExtMode == 1 && !extended || k.ExtMode == 2 && extended) continue;
+                return k;
             }
-
-            // 第三轮：兜底 —— 只按虚拟键码匹配（应对非常规键盘 / 虚拟机上报的怪异扫描码）
-            for (int i = 0; i < keys.Count; i++)
-            {
-                if (keys[i].Vk == vk)
-                    return keys[i];
-            }
-
             return null;
         }
 

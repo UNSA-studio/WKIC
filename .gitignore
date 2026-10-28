@@ -7,3 +7,10 @@ build/
 .vs/
 bin/
 obj/
+
+artifacts/
+**/bin/
+**/obj/
+*.binlog
+*.pfx
+*.p12

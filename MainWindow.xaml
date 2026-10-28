@@ -1,0 +1,33 @@
+<Window x:Class="WinKbdCheck.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Windows Keyboard Integrity Check · Windows 键盘完整性检测">
+    <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <NavigationView x:Name="Nav" PaneDisplayMode="Top" IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="True" SelectionChanged="OnNavigationChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="WelcomeItem" Content="1 · 使用说明" Tag="welcome">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Home" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="InventoryItem" Content="2 · 设备信息" Tag="inventory" IsEnabled="False">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Find" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="TestItem" Content="3 · 按键检测" Tag="test" IsEnabled="False">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Keyboard" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="ResultsItem" Content="4 · 检测结果" Tag="results" IsEnabled="False">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Accept" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <NavigationView.Header>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Windows 键盘完整性检测" Style="{StaticResource TitleTextBlockStyle}" TextWrapping="Wrap" />
+                    <TextBlock Text="Windows Keyboard Integrity Check   ·   WinUI 3" Style="{StaticResource CaptionTextBlockStyle}" />
+                </StackPanel>
+            </NavigationView.Header>
+            <Grid Padding="24,8,24,16">
+                <ContentControl x:Name="PageContent" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>

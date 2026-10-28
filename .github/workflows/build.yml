@@ -1,117 +1,144 @@
 name: build
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+    paths-ignore: ['dist/**', '**.md', 'legacy/**']
   workflow_dispatch:
-
 permissions:
   contents: write
   issues: write
-
+concurrency:
+  group: wkic-winui-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
-    runs-on: windows-latest
-
+    runs-on: windows-2022
+    timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Build (Release, .NET Framework 4.8)
-        id: build
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          msbuild WindowsKeyboardIntegrityCheck.csproj /p:Configuration=Release /p:OutputPath=build\ /v:normal 2>&1 |
-            Tee-Object -FilePath build_log.txt
-          exit $LASTEXITCODE
-
-      - name: Sign with self-signed certificate
-        if: steps.build.outcome == 'success'
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: microsoft/setup-msbuild@v2
+      - name: Core regression tests
         shell: pwsh
         run: |
-          # 免费签名方案：自签名代码签名证书（每次构建生成一张）
-          # 注意：自签名只在导入了对应公钥证书的机器上被信任，
-          #       其它机器仍显示"未知发布者"。这是免费的代价。
-          $cert = New-SelfSignedCertificate `
-            -Type CodeSigningCert `
-            -Subject "CN=UNSA-studio, O=UNSA-studio, E=UNSA-studio@outlook.com, C=CN" `
-            -CertStoreLocation Cert:\CurrentUser\My `
-            -NotAfter (Get-Date).AddYears(3) `
-            -KeyUsage DigitalSignature `
-            -KeyAlgorithm RSA `
-            -KeyLength 3072
-          Write-Host "self-signed cert thumbprint: $($cert.Thumbprint)"
-          Write-Host "subject: $($cert.Subject)"
-
-          Set-AuthenticodeSignature -FilePath build\WindowsKeyboardIntegrityCheck.exe `
-            -Certificate $cert -HashAlgorithm SHA256 |
-            Format-List Status, StatusMessage
-
-          $sig = Get-AuthenticodeSignature build\WindowsKeyboardIntegrityCheck.exe
-          Write-Host "signature status : $($sig.Status)"
-          Write-Host "signer           : $($sig.SignerCertificate.Subject)"
-          Write-Host "exe size         : $((Get-Item build\WindowsKeyboardIntegrityCheck.exe).Length) bytes"
-
-      - name: Show output
-        if: steps.build.outcome == 'success'
-        run: dir build
-
-      - name: Prepare build log
-        if: always()
+          New-Item artifacts -ItemType Directory -Force | Out-Null
+          dotnet run --project tests/CoreTests.csproj -c Release 2>&1 | Tee-Object artifacts/core-tests.txt
+          if ($LASTEXITCODE -ne 0) { throw "Core tests failed" }
+      - name: Build and publish real WinUI 3 app
         shell: pwsh
         run: |
-          if (Test-Path build_log.txt) {
-            $log = Get-Content build_log.txt -Raw
-            $body = "``````text`n" + $log + "`n``````"
-            Set-Content -Path build_log.md -Value $body -Encoding utf8
-            Get-Content build_log.txt | Select-Object -Last 60
+          $publish = Join-Path $pwd 'artifacts/publish/'
+          msbuild WindowsKeyboardIntegrityCheck.csproj /restore /t:Publish /p:Configuration=Release /p:Platform=x64 /p:PublishDir="$publish" /bl:artifacts/build.binlog /v:minimal 2>&1 | Tee-Object artifacts/build-log.txt
+          if ($LASTEXITCODE -ne 0) { throw "WinUI build failed" }
+      - name: WinUI launch, keyboard layout, click records and theme smoke tests
+        shell: pwsh
+        run: |
+          $out = Join-Path $pwd 'artifacts/ui-smoke'
+          New-Item $out -ItemType Directory -Force | Out-Null
+          $exe = (Resolve-Path artifacts/publish/WindowsKeyboardIntegrityCheck.exe).Path
+          $p = Start-Process -FilePath $exe -ArgumentList "--smoke-test=$out" -PassThru
+          if (-not $p.WaitForExit(90000)) { $p.Kill(); throw 'WinUI smoke test timed out' }
+          Get-ChildItem $out | Format-Table
+          if (-not (Test-Path "$out/PASS.json")) {
+            Get-ChildItem $out -Filter *.txt | Get-Content
+            Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-4)} -ErrorAction SilentlyContinue | Where-Object ProviderName -in @('.NET Runtime','Application Error') | Format-List | Out-String | Tee-Object artifacts/crash-log.txt
+            throw 'WinUI UI test did not pass'
           }
-
-      - name: Report failure as issue
-        if: steps.build.outcome == 'failure'
+          Get-Content "$out/PASS.json"
+      - name: Sign app and prepare certificate
+        shell: pwsh
+        env:
+          SIGNING_PFX: ${{ secrets.SIGNING_PFX }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          if ($env:SIGNING_PFX) {
+            [IO.File]::WriteAllBytes('artifacts/signing.pfx', [Convert]::FromBase64String($env:SIGNING_PFX))
+            $password = ConvertTo-SecureString $env:SIGNING_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath artifacts/signing.pfx -CertStoreLocation Cert:/CurrentUser/My -Password $password
+            Remove-Item artifacts/signing.pfx -Force
+          } else {
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=UNSA-studio, O=UNSA-studio, E=UNSA-studio@outlook.com, C=CN' -CertStoreLocation Cert:/CurrentUser/My -NotAfter (Get-Date).AddYears(3) -KeyAlgorithm RSA -KeyLength 3072
+          }
+          $cert.Thumbprint | Set-Content artifacts/cert-thumbprint.txt
+          Export-Certificate -Cert $cert -FilePath artifacts/publish/WKIC-selfsigned.cer -Force | Out-Null
+          $exe = 'artifacts/publish/WindowsKeyboardIntegrityCheck.exe'
+          Set-AuthenticodeSignature -FilePath $exe -Certificate $cert -HashAlgorithm SHA256 | Format-List
+          $sig = Get-AuthenticodeSignature $exe
+          if (-not $sig.SignerCertificate) { throw 'Executable has no signature' }
+          if ($sig.Status -eq 'HashMismatch') { throw 'Executable signature hash mismatch' }
+          $sig | Format-List | Out-String | Set-Content artifacts/signature.txt
+      - name: Build self-contained installer and portable ZIP
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+          & $iscc ("/DPayload=" + (Resolve-Path artifacts/publish).Path) packaging/WKIC.iss 2>&1 | Tee-Object artifacts/installer-log.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+          $thumb = (Get-Content artifacts/cert-thumbprint.txt).Trim()
+          $cert = Get-Item "Cert:/CurrentUser/My/$thumb"
+          Set-AuthenticodeSignature -FilePath artifacts/installer/WindowsKeyboardIntegrityCheck.exe -Certificate $cert -HashAlgorithm SHA256 | Format-List
+          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/WindowsKeyboardIntegrityCheck-portable-x64.zip
+          Get-FileHash artifacts/installer/WindowsKeyboardIntegrityCheck.exe, artifacts/WindowsKeyboardIntegrityCheck-portable-x64.zip | Format-List | Out-String | Set-Content artifacts/SHA256.txt
+      - name: Publish installer to dist and release runtime bundle
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue create --title "CI build failed" --body-file build_log.md
-          gh issue list
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build_log.txt
-          if-no-files-found: warn
-
-      - name: Upload exe
-        if: steps.build.outcome == 'success'
+          if ((Get-Item artifacts/installer/WindowsKeyboardIntegrityCheck.exe).Length -gt 98MB) { throw 'Installer too large for Git raw distribution' }
+          New-Item dist -ItemType Directory -Force | Out-Null
+          Copy-Item artifacts/installer/WindowsKeyboardIntegrityCheck.exe dist/WindowsKeyboardIntegrityCheck.exe -Force
+          Copy-Item artifacts/SHA256.txt dist/SHA256.txt -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f dist/WindowsKeyboardIntegrityCheck.exe dist/SHA256.txt
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m 'chore: publish WinUI 3 installer [skip ci]'
+            git pull --rebase origin main
+            if ($LASTEXITCODE -ne 0) { throw 'Distribution rebase failed' }
+            git push
+            if ($LASTEXITCODE -ne 0) { throw 'Distribution push failed' }
+          }
+          gh release view winui3 --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create winui3 --target $env:GITHUB_SHA --title 'WKIC - WinUI 3 build (1.0.0)' --notes 'WinUI 3 runtime included. Version remains 1.0.0. Self-signed; not Microsoft/CA signed.' --repo $env:GITHUB_REPOSITORY
+          }
+          gh release upload winui3 artifacts/installer/WindowsKeyboardIntegrityCheck.exe artifacts/WindowsKeyboardIntegrityCheck-portable-x64.zip artifacts/SHA256.txt --clobber --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+      - name: Upload application package
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: WindowsKeyboardIntegrityCheck
-          path: build/WindowsKeyboardIntegrityCheck.exe
-          if-no-files-found: error
-
-      - name: Publish exe to dist/ (raw download link)
-        if: steps.build.outcome == 'success' && !contains(github.event.head_commit.message, '[skip ci]')
-        shell: bash
+          path: |
+            artifacts/installer/WindowsKeyboardIntegrityCheck.exe
+            artifacts/WindowsKeyboardIntegrityCheck-portable-x64.zip
+            artifacts/SHA256.txt
+      - name: Upload build diagnostics and rendered UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WKIC-UI-verification
+          path: |
+            artifacts/*.txt
+            artifacts/*.binlog
+            artifacts/ui-smoke/**
+      - name: Report failed build diagnostics
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p dist
-          cp build/WindowsKeyboardIntegrityCheck.exe dist/WindowsKeyboardIntegrityCheck.exe
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f dist/WindowsKeyboardIntegrityCheck.exe
-          if git diff --cached --quiet; then
-            echo "dist unchanged, nothing to publish"
-            exit 0
-          fi
-          git commit -m "chore: publish built exe [skip ci]"
-          git push
-
-      - name: Fail the job if the build failed
-        if: steps.build.outcome == 'failure'
-        run: exit 1
+          $body = 'WinUI 3 build failure: ' + $env:GITHUB_SHA + "`n"
+          Get-ChildItem artifacts -Recurse -Filter *.txt | ForEach-Object {
+            $body += "`n## " + $_.Name + "`n" + (Get-Content $_.FullName -Tail 65 | Out-String)
+          }
+          $body.Substring(0, [Math]::Min($body.Length, 45000)) | Set-Content artifacts/failure.md
+          gh issue create --title 'WinUI 3 CI check failed' --body-file artifacts/failure.md --repo $env:GITHUB_REPOSITORY
